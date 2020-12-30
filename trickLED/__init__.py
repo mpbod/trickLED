@@ -1,2 +1,2 @@
-from trickLED import *
-#from . import animations
+from .trickLED import *
+# from . import animations

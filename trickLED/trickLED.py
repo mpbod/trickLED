@@ -2,37 +2,33 @@
 import struct
 from math import ceil
 from random import getrandbits
-try:
-    from neopixel import NeoPixel as _NeoPixel
-except ImportError:
-    class _NeoPixel:
-        def __init__(self, pin, n, bpp=3):
-            self.pin = pin,
-            self.n = n
-            self.bpp = bpp
-            self.buf = bytearray(n * bpp)
-
-        def write(self):
-            pass
+from neopixel import NeoPixel
+from micropython import const
 
 
-#from os import urandom as getrandbytes
-
-BITS_LOW = 15  # 00001111
-BITS_MID = 60  # 00111100
-BITS_HIGH = 240  # 11110000
-BITS_EVEN = 85  # 01010101
-BITS_ODD = 170  # 10101010
-BITS_ALL = 255  # 11111111
-BITS_NONE = 0  # 00000000
-BITS_ALL_32 = 4294967295 # 32 1s
+BITS_LOW = const(15)      # 00001111
+BITS_MID = const(60)      # 00111100
+BITS_HIGH = const(240)    # 11110000
+BITS_EVEN = const(85)     # 01010101
+BITS_ODD = const(170)     # 10101010
+BITS_NONE = const(0)      # 00000000
+BITS_ALL = const(255)     # 11111111
+BITS_ALL_32 = const(4294967295) # 32 1s
 
 
 def blend(col1, col2, pct=50):
+    """
+    Blend color 1 with percentage of color 2
+
+    :param col1: Color 1
+    :param col2: Color 2
+    :param pct: Percentage of color 2
+    :return: color tuple
+    """
     if 0 <= pct <= 100:      
         result = [0, 0, 0]
-        for i in (0,1,2):
-            result[i] = uint(col1[i] + (col2[i] - col1[i]) / 100 * pct)
+        for i in range(len(col1)):
+            result[i] = int8(col1[i] + (col2[i] - col1[i]) / 100 * pct)
         return tuple(result)
     else:
         return col1
@@ -43,41 +39,80 @@ def step_inc(c1, c2, steps):
     return tuple((c2[i] - c1[i]) / steps for i in range(len(c1)))  
 
 
-def uint(val):
+def int8(val):
     if 0 <= val <= 255:
         return int(val)
     if val < 0:
         return 0
     else:
-        return 255  
+        return 255
 
 
 def shift_color(col, steps):
     # brighten or dim a color (1 = brighten, -1 = dim)
     if steps > 0:
-        return tuple([uint(c << steps) for c in col])
+        return tuple([int8(c << steps) for c in col])
     elif steps < 0:
         return tuple([c >> -steps for c in col])
     else:
         return col
 
 
-def color_wheel(pos, brightness=255, as_int=False):
+def adjust_brightness(col, brightness=10):
+    """
+    Adjust brightness without converting to HSV
+
+    :param col: Color
+    :param brightness: Brightness 0-10
+    :return: color tuple
+    """
+    if 1 <= brightness <= 10:
+        if not any(col):
+            # black
+            mv = brightness * 25
+            return tuple(mv for v in col)
+        else:
+            lit = [1 if v > 0 else 0 for v in col]
+            max_val = max(col)
+            adj = brightness * 25 / max_val
+            val = []
+            for i in range(len(col)):
+                v = int8(col[i] * adj)
+                if v == 0 and lit[i]:
+                    v = 1
+                val.append(v)
+            return tuple(val)
+    if brightness == 0:
+        return (0, 0, 0)
+    else:
+        raise ValueError('brightness must be between 0 and 10')
+
+def adj_b2(col, b):
+    if 1 <= b <= 10:
+        mv = max(col)
+
+
+def add8(a, b):
+    return int8(a + b)
+
+
+def mult8(a, b):
+    return int8(a * b)
+
+
+def color_wheel(pos, max_val=255):
     pos %= 360
     pa = pos % 120
-    ss = brightness / 120
-    ci = uint(ss * pa)
-    cd = brightness - ci
+    ss = max_val / 120
+    ci = int8(ss * pa)
+    cd = max_val - ci
     if pos < 120:
         val = (cd, ci, 0)
     elif pos < 240:
         val = (0, cd, ci)
     else:
         val = (ci, 0, cd)
-    if as_int:
-        return val[0] << 16 | val[1] << 8 | val[2]
-    else:
-        return val
+    return val
 
 
 def rand32(pct):
@@ -122,10 +157,10 @@ def rand_color(bpp=3, mask=None):
     return tuple(val.to_bytes(bpp, 'big'))
 
 
-def _colval(val, bpp=3):
+def colval(val, bpp=3):
     # allow the input of color values as ints (including hex) and None/0 for black
     if not val:
-        val = (0, 0, 0)
+        val = (0,) * bpp
     elif isinstance(val, int):
         val = tuple(val.to_bytes(bpp, 'big'))
     return val
@@ -166,17 +201,17 @@ class BitMap:
             self.buf[byte_idx] |= mask
 
     def __getitem__(self, i):
-        if 0 <= i < self._mi:
+        if 0 <= i < self.n:
             return self.bit(i)
         else:
-            return self.bit(i % self.n)
+            raise IndexError('index out of range')
 
     def __setitem__(self, i, val):
         if 0 <= i < self._mi:
             #
             self.bit(i, val)
         else:
-            raise IndexError('Index out of range')
+            raise IndexError('index out of range')
 
     def scroll(self, steps):
         if steps > 0:
@@ -225,7 +260,7 @@ class BitMap:
             n = self.wc * 2
             v = val.to_bytes(2, 'little')
         elif val < 1 << 24:
-            n = ceil(self.wc * 3 / 4)
+            n = ceil(self.wc * 4 / 3)
             v = val.to_bytes(3, 'little')
         else:
             n = self.wc
@@ -248,14 +283,20 @@ class BitMap:
 
 class ByteMap:
     """
+    Map some number of bytes to items. Values automatically wrap around instead of throwing index errors.
+    Use for color palettes or keeping track of things like temperature during animations.
     """
     def __init__(self, n, bpi=3):
+        """
+        :param n: Number of items
+        :param bpi: bytes per item
+        """
         self.n = n
         self.bpi = bpi
         self.buf = bytearray(n * bpi)
 
     def __setitem__(self, key, value):
-        value = bytes(_colval(value, self.bpi))
+        value = bytes(colval(value, self.bpi))
         idx = key * self.bpi
         if 0 <= key < self.n:
             self.buf[idx:idx + self.bpi] = value
@@ -263,10 +304,13 @@ class ByteMap:
             self.buf += value
             self.n += 1
         else:
-            raise IndexError('Index out of range')
+            raise IndexError('index out of range')
 
     def __getitem__(self, key):
-        idx = (key * self.bpi) % self.n
+        if 0 <= key < self.n:
+            idx = (key * self.bpi)
+        else:
+            raise IndexError('index out of range')
         return tuple(self.buf[idx: idx + self.bpi])
 
     def __len__(self):
@@ -277,11 +321,11 @@ class ByteMap:
         self.buf = self.buf[cut:] + self.buf[:cut]
 
 
-class TrickLED(_NeoPixel): 
+class TrickLED(NeoPixel):
     """ """
     def __setitem__(self, i, val):
         if 0 <= i < self.n:
-            val = _colval(val, self.bpp)
+            val = colval(val, self.bpp)
             super().__setitem__(i, val)
         else:
             raise IndexError('Index out of range')
@@ -319,13 +363,12 @@ class TrickLED(_NeoPixel):
         if end_pos is None or end_pos >= self.n:
             end_pos = self.n - 1
         steps = end_pos - start_pos
-        col1 = _colval(col1, self.bpp)
-        col2 = _colval(col2, self.bpp)
+        col1 = colval(col1, self.bpp)
+        col2 = colval(col2, self.bpp)
         inc = step_inc(col1, col2, steps)
         for i in range(steps + 1):
-            col = tuple(uint(col1[n] + inc[n] * i) for n in range(len(col1)))
+            col = tuple(int8(col1[n] + inc[n] * i) for n in range(len(col1)))
             self[start_pos + i] = col
-
 
     def fill_random(self, start_pos=0, end_pos=None, mask=(BITS_MID, BITS_MID, BITS_MID)):
         """
@@ -344,6 +387,31 @@ class TrickLED(_NeoPixel):
         for i in range(start_pos, end_pos + 1):
             self[i] = getrandbits(bl) & mi
 
+    def fill_random_vivid(self, start_pos=0, end_pos=None):
+        """
+        Fill strip with vivid random colors.
+
+        :param start_pos: Start position, defaults to beginning of strip
+        :param end_pos: End position, defaults to end of strip
+        """
+        if end_pos is None or end_pos >= self.n:
+            end_pos = self.n - 1
+        # set a minimum
+        m = 32
+        # pick a random value for each channel, set the lowest to 0
+        primary = ((255, 0, 0))
+
+
+        for i in range(start_pos, end_pos + 1):
+            # want use only rgb even if we have rgbw strip
+            val = colval(getrandbits(24))
+            min_val = min(val)
+            val = [v | m if v > min_val else 0 for v in val]
+            if not any(val):
+                # if not lit pick random primary color
+                val = 255 << [16, 8, 0][i % 3]
+            self[i] = val
+
     def blend_to_color(self, color, pct=50, start_pos=0, end_pos=None):
         """
          Blend each pixel with color from start position to end position.
@@ -353,8 +421,9 @@ class TrickLED(_NeoPixel):
         :param start_pos: Start position, defaults to beginning of strip
         :param end_pos: End position
         """
-        last_col = (0, 0, 0)
-        blend_col = (0, 0, 0)
+        color = colval(color, self.bpp)
+        last_col = (0,) * self.bpp
+        blend_col = (0,) * self.bpp
         if end_pos is None:
             end_pos = self.n - 1
         for i in range(start_pos, end_pos + 1):
@@ -382,12 +451,27 @@ class TrickLED(_NeoPixel):
         if shift < 0:
             op = lambda x: x >> -shift
         elif shift > 0:
-            op = lambda x: uint(x << shift)
+            op = lambda x: int8(x << shift)
         for i in range(start_pos, end_pos + 1):
             self[i] = tuple(op(x) for x in self[i])
-        
 
-class TrickMatrix(_NeoPixel):
+    def repeat(self, n):
+        """
+        Copy the first n pixels and repeat them
+
+        :param n: Number of pixels to copy (not the zero-based index!)
+        """
+        loc = jump = n * self.bpp
+        end = len(self.buf)
+        section = self.buf[0:jump]
+        while loc + jump <= end:
+            self.buf[loc:loc + jump] = section
+            loc += jump
+        if loc < end:
+            self.buf[loc:end] = section[:(end - loc)]
+
+
+class TrickMatrix(NeoPixel):
     # All rows run in the same direction
     LAYOUT_STRAIGHT = 1
     # Direction of rows alternate from right to left
