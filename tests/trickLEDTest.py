@@ -40,17 +40,24 @@ class TrickLEDTest(unittest.TestCase):
         self.assertEqual(250, val[0], 'brightness=10 was not 250')
 
     def test_color_wheel(self):
-        c = trickLED.color_wheel(60, 200)
-        self.assertEqual((100, 100, 0), c, 'incorrect color for 60 red/green')
-        c = trickLED.color_wheel(180, 100)
-        self.assertEqual((0, 50, 50), c, 'incorrect color for 180 green/blue')
-        c = trickLED.color_wheel(300, 60)
-        self.assertEqual((30, 0, 30), c, 'incorrect blend for blue/red')
+        # wheel is adjusted to 255 instead of 360
+        c = trickLED.color_wheel(0, 255)
+        self.assertEqual((255, 0, 0), c, 'incorrect color_wheel for red')
+        c = trickLED.color_wheel(42, 200)
+        self.assertEqual((102, 98, 0), c, 'incorrect color_wheel for red/green')
+        c = trickLED.color_wheel(85, 255)
+        self.assertEqual((0, 255, 0), c, 'incorrect color_wheel for green')
+        c = trickLED.color_wheel(127, 100)
+        self.assertEqual((0, 51, 49), c, 'incorrect color_wheel for green/blue')
+        c = trickLED.color_wheel(170, 255)
+        self.assertEqual((0, 0, 255), c, 'incorrect color_wheel for blue')
+        c = trickLED.color_wheel(212, 60)
+        self.assertEqual((29, 0, 31), c, 'incorrect color_wheel for blue/red')
 
     def test_uint(self):
-        self.assertEqual(0, trickLED.int8(-10), 'negative uint value should return 0')
-        self.assertEqual(100, trickLED.int8(100.0), 'uint should return return int')
-        self.assertEqual(255, trickLED.int8(256.0)), 'uint should return maximum of 255'
+        self.assertEqual(0, trickLED.int8(-10), 'negative int8 value should return 0')
+        self.assertEqual(100, trickLED.int8(100.0), 'int8 should return return int')
+        self.assertEqual(255, trickLED.int8(256.0)), 'int8 should return maximum of 255'
 
     def test_rand32(self):
         fmt = '{:032b}'
@@ -111,3 +118,4 @@ class TrickLEDTest(unittest.TestCase):
         self.assertEqual(self.c1, bm[20], 'did not get value we stored back')
         bm.scroll(2)
         self.assertEqual(self.c1, bm[22], 'incorrect value returned after scroll')
+

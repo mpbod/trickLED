@@ -1,19 +1,18 @@
-
+import math
 import struct
-from math import ceil
+
 from random import getrandbits
 from neopixel import NeoPixel
 from micropython import const
 
-
-BITS_LOW = const(15)      # 00001111
-BITS_MID = const(60)      # 00111100
-BITS_HIGH = const(240)    # 11110000
-BITS_EVEN = const(85)     # 01010101
-BITS_ODD = const(170)     # 10101010
-BITS_NONE = const(0)      # 00000000
-BITS_ALL = const(255)     # 11111111
-BITS_ALL_32 = const(4294967295) # 32 1s
+BITS_LOW = const(15)             # 00001111
+BITS_MID = const(60)             # 00111100
+BITS_HIGH = const(240)           # 11110000
+BITS_EVEN = const(85)            # 01010101
+BITS_ODD = const(170)            # 10101010
+BITS_NONE = const(0)             # 00000000
+BITS_ALL = const(255)            # 11111111
+BITS_ALL_32 = const(4294967295)  # 32 1s
 
 
 def blend(col1, col2, pct=50):
@@ -83,13 +82,9 @@ def adjust_brightness(col, brightness=10):
                 val.append(v)
             return tuple(val)
     if brightness == 0:
-        return (0, 0, 0)
+        return 0, 0, 0
     else:
         raise ValueError('brightness must be between 0 and 10')
-
-def adj_b2(col, b):
-    if 1 <= b <= 10:
-        mv = max(col)
 
 
 def add8(a, b):
@@ -100,19 +95,62 @@ def mult8(a, b):
     return int8(a * b)
 
 
-def color_wheel(pos, max_val=255):
-    pos %= 360
-    pa = pos % 120
-    ss = max_val / 120
-    ci = int8(ss * pa)
-    cd = max_val - ci
-    if pos < 120:
-        val = (cd, ci, 0)
-    elif pos < 240:
-        val = (0, cd, ci)
+def sin8(v):
+    """ """
+    vr = v / 127.5 * math.pi
+    return math.sin(vr)
+
+
+def rgb2hsv(col):
+    """
+    Convert RGB color to HSV. Hue is 255 "degrees" instead of 360. Saturation and value are also 0-255 instead of 0-1.0.
+
+    :param col: RGB color
+    :return: HSV color
+    """
+    col = colval(col)
+    r, g, b = col
+    max_v = max(col)
+    d = max_v - min(col)
+    if d == 0 or max_v == 0:
+        return 0, 0, max_v
+    s = d / max_v * 255
+    if r == max_v:
+        h = (g - b) / d
+    elif g == max_v:
+        h = 2 + (b - r) / d
     else:
-        val = (ci, 0, cd)
-    return val
+        h = 4 + (r - g) / d
+    h *= 42.5
+    if h < 0:
+        h += 255
+    return int8(h), int8(s), max_v
+
+
+def color_wheel(hue, val=255):
+    hue = int8(hue) % 255
+    pa = hue % 85
+    ss = val / 85
+    ci = int8(ss * pa)
+    cd = int8(val) - ci
+    if hue < 85:
+        return cd, ci, 0
+    elif hue < 170:
+        return 0, cd, ci
+    else:
+        return ci, 0, cd
+
+
+def heat_color(temp):
+    """ """
+    t192 = temp * 191 // 255
+    heat_ramp = (t192 & 63) << 2
+    if t192 < 64:
+        return heat_ramp, 0, 0
+    elif t192 < 128:
+        return 255, heat_ramp, 0
+    else:
+        return 255, 255, heat_ramp
 
 
 def rand32(pct):
@@ -182,7 +220,7 @@ class BitMap:
     def __init__(self, n, pct=50):
         self.n = n
         # number of 32-bit words
-        self.wc = ceil(n / 32)
+        self.wc = math.ceil(n / 32)
         self._mi = self.wc * 32
         # Hamming weight, rough percentage of ones when randomizing
         self.pct = pct
@@ -260,7 +298,7 @@ class BitMap:
             n = self.wc * 2
             v = val.to_bytes(2, 'little')
         elif val < 1 << 24:
-            n = ceil(self.wc * 4 / 3)
+            n = math.ceil(self.wc * 4 / 3)
             v = val.to_bytes(3, 'little')
         else:
             n = self.wc
@@ -307,11 +345,25 @@ class ByteMap:
             raise IndexError('index out of range')
 
     def __getitem__(self, key):
-        if 0 <= key < self.n:
-            idx = (key * self.bpi)
-        else:
-            raise IndexError('index out of range')
-        return tuple(self.buf[idx: idx + self.bpi])
+        if isinstance(key, int):
+            if 0 <= key < self.n:
+                si = key * self.bpi
+            elif -self.n < key < 0:
+                si = (key + self.n) * self.bpi
+            else:
+                raise IndexError('index out of range')
+            if self.bpi > 1:
+                return tuple(self.buf[si: si + self.bpi])
+            else:
+                return self.buf[si]
+        elif isinstance(key, slice):
+            si = (key.start if key.start else 0) * self.bpi
+            ei = (key.stop if key.stop else self.n) * self.bpi
+            if key.step and (key.step < -1 or key.step > 1):
+                step = key.step * self.bpi
+            else:
+                step = key.step
+            return self.buf[si:ei:step]
 
     def __len__(self):
         return self.n
@@ -320,9 +372,47 @@ class ByteMap:
         cut = self.bpi * -step
         self.buf = self.buf[cut:] + self.buf[:cut]
 
+    def fill(self, val, start_pos=0, end_pos=None):
+        val = colval(val, self.bpi)
+        if end_pos is None or end_pos >= self.n:
+            end_pos = self.n - 1
+        for i in range(start_pos, end_pos + 1):
+            self[i] = val
+
+    def fill_gradient(self, v1, v2, start_pos=0, end_pos=None):
+        if end_pos is None or end_pos >= self.n:
+            end_pos = self.n - 1
+        steps = end_pos - start_pos
+        v1 = colval(v1, self.bpi)
+        v2 = colval(v2, self.bpi)
+        inc = step_inc(v1, v2, steps)
+        for i in range(steps):
+            val = tuple(int8(v1[n] + inc[n] * i) for n in range(self.bpi))
+            self[start_pos + i] = val
+        self[end_pos] = v2
+
 
 class TrickLED(NeoPixel):
     """ """
+
+    # repeat section 0-n, 0-n, 0-n
+    REPEAT_MODE_STRIPE = const(1)
+    # repeat section alternating backward and forward 0-n, n-0, 0-n
+    REPEAT_MODE_MIRROR = const(2)
+
+    def __init__(self, pin, n, repeat_n=None, repeat_mode=None, **kwargs):
+        """
+        
+        :param pin: Data pin
+        :param n: number of pixels
+        :param repeat_n: If set, the first n pixels will be repeated across the rest of the strip 
+        :param repeat_mode: Controls if section is repeated or mirrored (alternating between forward and reversed)
+        :param kwargs: bpp, timing
+        """
+        super().__init__(pin, n, **kwargs)
+        self.repeat_n = repeat_n
+        self.repeat_mode = repeat_mode if repeat_mode else TrickLED.REPEAT_MODE_STRIPE
+
     def __setitem__(self, i, val):
         if 0 <= i < self.n:
             val = colval(val, self.bpp)
@@ -366,53 +456,24 @@ class TrickLED(NeoPixel):
         col1 = colval(col1, self.bpp)
         col2 = colval(col2, self.bpp)
         inc = step_inc(col1, col2, steps)
-        for i in range(steps + 1):
+        for i in range(steps):
             col = tuple(int8(col1[n] + inc[n] * i) for n in range(len(col1)))
             self[start_pos + i] = col
+        self[end_pos] = col2
 
-    def fill_random(self, start_pos=0, end_pos=None, mask=(BITS_MID, BITS_MID, BITS_MID)):
+    def fill_gen(self, gen, start_pos=0, end_pos=None):
         """
-        Fill strip with random colors from start position to end position. Random colors will generally
-        be pastels. Use masks to control the hue and brightness.
-        (255, 0, 127) will give bright reds/purples. (0, 15, 31) will give faint blues/greens.
-
-        :param start_pos: Start position, defaults to beginning of strip
-        :param end_pos: End position, defaults to end of strip
-        :param mask: Bit masks for each color channel
-        """
-        mi = mask[0] << 16 | mask[1] << 8 | mask[2]
-        if end_pos is None or end_pos >= self.n:
-            end_pos = self.n - 1
-        bl = self.bpp * 8
-        for i in range(start_pos, end_pos + 1):
-            self[i] = getrandbits(bl) & mi
-
-    def fill_random_vivid(self, start_pos=0, end_pos=None):
-        """
-        Fill strip with vivid random colors.
-
+        Fill strip with with colors from a generator.
+        :param gen: Color generator
         :param start_pos: Start position, defaults to beginning of strip
         :param end_pos: End position, defaults to end of strip
         """
         if end_pos is None or end_pos >= self.n:
             end_pos = self.n - 1
-        # set a minimum
-        m = 32
-        # pick a random value for each channel, set the lowest to 0
-        primary = ((255, 0, 0))
-
-
         for i in range(start_pos, end_pos + 1):
-            # want use only rgb even if we have rgbw strip
-            val = colval(getrandbits(24))
-            min_val = min(val)
-            val = [v | m if v > min_val else 0 for v in val]
-            if not any(val):
-                # if not lit pick random primary color
-                val = 255 << [16, 8, 0][i % 3]
-            self[i] = val
+            self[i] = next(gen)
 
-    def blend_to_color(self, color, pct=50, start_pos=0, end_pos=None):
+    def blend_to_color(self, color=0, pct=50, start_pos=0, end_pos=None):
         """
          Blend each pixel with color from start position to end position.
 
@@ -448,21 +509,19 @@ class TrickLED(NeoPixel):
             raise ValueError('shift must be between -7 and 7')
         if end_pos is None or end_pos >= self.n:
             end_pos = self.n - 1
-        if shift < 0:
-            op = lambda x: x >> -shift
-        elif shift > 0:
-            op = lambda x: int8(x << shift)
         for i in range(start_pos, end_pos + 1):
-            self[i] = tuple(op(x) for x in self[i])
+            self[i] = tuple(shift_bits(x, shift) for x in self[i])
 
-    def repeat(self, n):
+    def _repeat_stripe(self, n=None):
         """
-        Copy the first n pixels and repeat them
+        Copy the first n pixels and repeat them over the rest of the strip
 
         :param n: Number of pixels to copy (not the zero-based index!)
         """
+        if n is None:
+            n = self.repeat_n
         loc = jump = n * self.bpp
-        end = len(self.buf)
+        end = self.n * self.bpp
         section = self.buf[0:jump]
         while loc + jump <= end:
             self.buf[loc:loc + jump] = section
@@ -470,10 +529,33 @@ class TrickLED(NeoPixel):
         if loc < end:
             self.buf[loc:end] = section[:(end - loc)]
 
+    def _repeat_mirror(self, n=None):
+        """ Copy the first n pixels and repeat them alternating directions """
+        if n is None:
+            n = self.repeat_n
+        rl = n - 1
+        d = -1
+        for i in range(n, self.n):
+            self[i] = self[rl]
+            if 0 < rl < n:
+                rl += 1 * d
+            elif rl == 0:
+                d = 1
+            else:
+                d = -1
+
+    def write(self):
+        if self.repeat_n:
+            if self.repeat_mode == TrickLED.REPEAT_MODE_STRIPE:
+                self._repeat_stripe()
+            elif self.repeat_mode == TrickLED.REPEAT_MODE_MIRROR:
+                self._repeat_mirror()
+        super().write()
+
 
 class TrickMatrix(NeoPixel):
     # All rows run in the same direction
-    LAYOUT_STRAIGHT = 1
+    LAYOUT_STRAIGHT =  const(1)
     # Direction of rows alternate from right to left
     LAYOUT_SNAKE = 2
     
@@ -521,7 +603,9 @@ class TrickMatrix(NeoPixel):
                 self.pixel(ix, iy, color)
     
     def hscroll(self, step):
+        """ TODO: implement matrix scrolling """
         pass
 
     def vscroll(self, step):
+        """ TODO: implement matrix scrolling """
         pass
