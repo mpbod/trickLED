@@ -13,6 +13,9 @@ BITS_ODD = const(170)            # 10101010
 BITS_NONE = const(0)             # 00000000
 BITS_ALL = const(255)            # 11111111
 BITS_ALL_32 = const(4294967295)  # 32 1s
+FADE_IN = const(1)
+FADE_OUT = const(2)
+FADE_IN_OUT = const(3)
 
 
 def blend(col1, col2, pct=50):
@@ -27,7 +30,7 @@ def blend(col1, col2, pct=50):
     if 0 <= pct <= 100:      
         result = [0, 0, 0]
         for i in range(len(col1)):
-            result[i] = int8(col1[i] + (col2[i] - col1[i]) / 100 * pct)
+            result[i] = uint8(col1[i] + (col2[i] - col1[i]) / 100 * pct)
         return tuple(result)
     else:
         return col1
@@ -38,7 +41,7 @@ def step_inc(c1, c2, steps):
     return tuple((c2[i] - c1[i]) / steps for i in range(len(c1)))  
 
 
-def int8(val):
+def uint8(val):
     if 0 <= val <= 255:
         return int(val)
     if val < 0:
@@ -50,7 +53,7 @@ def int8(val):
 def shift_color(col, steps):
     # brighten or dim a color (1 = brighten, -1 = dim)
     if steps > 0:
-        return tuple([int8(c << steps) for c in col])
+        return tuple([uint8(c << steps) for c in col])
     elif steps < 0:
         return tuple([c >> -steps for c in col])
     else:
@@ -76,7 +79,7 @@ def adjust_brightness(col, brightness=10):
             adj = brightness * 25 / max_val
             val = []
             for i in range(len(col)):
-                v = int8(col[i] * adj)
+                v = uint8(col[i] * adj)
                 if v == 0 and lit[i]:
                     v = 1
                 val.append(v)
@@ -88,11 +91,11 @@ def adjust_brightness(col, brightness=10):
 
 
 def add8(a, b):
-    return int8(a + b)
+    return uint8(a + b)
 
 
 def mult8(a, b):
-    return int8(a * b)
+    return uint8(a * b)
 
 
 def sin8(v):
@@ -124,15 +127,15 @@ def rgb2hsv(col):
     h *= 42.5
     if h < 0:
         h += 255
-    return int8(h), int8(s), max_v
+    return uint8(h), uint8(s), max_v
 
 
 def color_wheel(hue, val=255):
-    hue = int8(hue) % 255
+    hue = uint8(hue) % 255
     pa = hue % 85
     ss = val / 85
-    ci = int8(ss * pa)
-    cd = int8(val) - ci
+    ci = uint8(ss * pa)
+    cd = uint8(val) - ci
     if hue < 85:
         return cd, ci, 0
     elif hue < 170:
@@ -179,20 +182,6 @@ def rand32(pct):
         return 2 ** 32 - 1
     else:
         return grb(32) | grb(32) | grb(32) | grb(32)
-
-
-def rand_color(bpp=3, mask=None):
-    mi = 0
-    bc = bpp * 8
-    if mask:
-        if bpp != len(mask):
-            raise ValueError('The mask must contain the same number of items as bytes to be returned.')
-        for i in range(bpp):
-            mi = (mi << 8) | mask[i]
-    else:
-        mi = 2 ** bc - 1
-    val = getrandbits(bc) & mi
-    return tuple(val.to_bytes(bpp, 'big'))
 
 
 def colval(val, bpp=3):
@@ -387,14 +376,14 @@ class ByteMap:
         v2 = colval(v2, self.bpi)
         inc = step_inc(v1, v2, steps)
         for i in range(steps):
-            val = tuple(int8(v1[n] + inc[n] * i) for n in range(self.bpi))
+            val = tuple(uint8(v1[n] + inc[n] * i) for n in range(self.bpi))
             self[start_pos + i] = val
         self[end_pos] = v2
 
 
 class TrickLED(NeoPixel):
-    """ """
-
+    """ NeoPixels with benefits to aid in creating animations.
+    """
     # repeat section 0-n, 0-n, 0-n
     REPEAT_MODE_STRIPE = const(1)
     # repeat section alternating backward and forward 0-n, n-0, 0-n
@@ -402,7 +391,6 @@ class TrickLED(NeoPixel):
 
     def __init__(self, pin, n, repeat_n=None, repeat_mode=None, **kwargs):
         """
-        
         :param pin: Data pin
         :param n: number of pixels
         :param repeat_n: If set, the first n pixels will be repeated across the rest of the strip 
@@ -418,7 +406,7 @@ class TrickLED(NeoPixel):
             val = colval(val, self.bpp)
             super().__setitem__(i, val)
         else:
-            raise IndexError('Index out of range')
+            raise IndexError('Assignment index out of range')
 
     def scroll(self, step=1):
         """ Scroll the pixels some number of steps in the given direction.
@@ -457,7 +445,7 @@ class TrickLED(NeoPixel):
         col2 = colval(col2, self.bpp)
         inc = step_inc(col1, col2, steps)
         for i in range(steps):
-            col = tuple(int8(col1[n] + inc[n] * i) for n in range(len(col1)))
+            col = tuple(uint8(col1[n] + inc[n] * i) for n in range(len(col1)))
             self[start_pos + i] = col
         self[end_pos] = col2
 
@@ -535,8 +523,9 @@ class TrickLED(NeoPixel):
             n = self.repeat_n
         rl = n - 1
         d = -1
+        setitem = super().__setitem__
         for i in range(n, self.n):
-            self[i] = self[rl]
+            setitem(i, self[rl])
             if 0 < rl < n:
                 rl += 1 * d
             elif rl == 0:

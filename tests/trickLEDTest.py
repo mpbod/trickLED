@@ -55,9 +55,9 @@ class TrickLEDTest(unittest.TestCase):
         self.assertEqual((29, 0, 31), c, 'incorrect color_wheel for blue/red')
 
     def test_uint(self):
-        self.assertEqual(0, trickLED.int8(-10), 'negative int8 value should return 0')
-        self.assertEqual(100, trickLED.int8(100.0), 'int8 should return return int')
-        self.assertEqual(255, trickLED.int8(256.0)), 'int8 should return maximum of 255'
+        self.assertEqual(0, trickLED.uint8(-10), 'negative int8 value should return 0')
+        self.assertEqual(100, trickLED.uint8(100.0), 'int8 should return return int')
+        self.assertEqual(255, trickLED.uint8(256.0)), 'int8 should return maximum of 255'
 
     def test_rand32(self):
         fmt = '{:032b}'
