@@ -1,7 +1,12 @@
 import time
 from . import trickLED
 from . import generators
-from random import getrandbits, randrange
+from random import getrandbits
+
+try:
+    from random import randrange
+except ImportError:
+    randrange = trickLED.randrange
 
 try:
     import uasyncio as asyncio
@@ -20,7 +25,10 @@ def default_palette(n, brightness=200):
 
 class AnimationBase:
     """ Animation base class. """
-    def __init__(self, leds, interval=100, palette=None, generator=None, brightness=200, **kwargs):
+    FILL_MODE_SOLID = 'solid'
+    FILL_MODE_MULTI = 'multi'
+
+    def __init__(self, leds, interval=50, palette=None, generator=None, brightness=200, **kwargs):
         """
         :param leds: TrickLED object
         :param interval: millisecond pause between each frame
@@ -30,7 +38,7 @@ class AnimationBase:
         :param kwargs: additional keywords will be saved to self.settings
         """
         if not isinstance(leds, trickLED.TrickLED):
-            raise ValueError('pxl must be an instance of TrickLED')
+            raise ValueError('leds must be an instance of TrickLED')
         self.leds = leds
         self.frame = 0
         self.palette = palette
@@ -66,25 +74,29 @@ class AnimationBase:
             self.settings[kw] = kwargs[kw]
         self.leds.fill(0)
         self.setup()
-        self.frame = 0
-        st = time.ticks_ms()
+        self.frame = 0        
+        ival = self.settings['interval']
+        self.state['start_ticks'] = time.ticks_ms()
         try:
             while max_iterations == 0 or self.frame < max_iterations:
                 self.frame += 1
                 self.calc_frame()
                 self.leds.write()
-                await asyncio.sleep_ms(self.settings['interval'])
-            self._print_fps(st)
+                await asyncio.sleep_ms(ival)
+            self._print_fps()
         except KeyboardInterrupt:
-            self._print_fps(st)
+            self._print_fps()
             return
 
-    def _print_fps(self, start_ticks):
+    def _print_fps(self):
+        st = self.state.get('start_ticks')
+        if st is None:
+            return
         et = time.ticks_ms()
         ival = self.settings.get('interval')
-        fps = self.frame / time.ticks_diff(et, start_ticks) * 1000
+        fps = self.frame / time.ticks_diff(et, st) * 1000
         ifps = 1000 / ival if ival > 0 else 1000
-        print('Actual fps: {:0.02f} - Interval fps: {:0.02f}'.format(fps, ifps))
+        print('Actual fps: {:0.02f} - interval fps: {:0.02f}\n'.format(fps, ifps))
 
 
 class LitBits(AnimationBase):
@@ -106,36 +118,33 @@ class LitBits(AnimationBase):
         self.settings['lit_scroll_speed'] = int(lit_scroll_speed)
         self.settings['lit_percent'] = lit_percent
         # controls which leds are lit and which are off
-        self.lit_bits = trickLED.BitMap(self.calc_n)
+        self.lit = trickLED.BitMap(self.calc_n)
         if not self.settings['lit_percent']:
-            self.lit_bits.repeat(119)  # three on one off
+            self.lit.repeat(119)  # three on one off
 
     def setup(self):
         if self.palette is None:
             self.palette = default_palette(20)
         if self.settings.get('lit_percent'):
-            self.lit_bits.pct = self.settings.get('lit_percent')
-            self.lit_bits.randomize()
+            self.lit.pct = self.settings.get('lit_percent')
+            self.lit.randomize()
 
     def calc_frame(self):
         if self.settings['lit_percent'] and self.frame % 30 == 0:
-            self.lit_bits.randomize()
+            self.lit.randomize()
         pl = len(self.palette)
         for i in range(self.calc_n):
-            if self.lit_bits[i] == 1:
+            if self.lit[i] == 1:
                 col = self.palette[i % pl]
             else:
                 col = 0
             self.leds[i] = col
         self.palette.scroll(self.settings.get('scroll_speed', 1))
-        self.lit_bits.scroll(self.settings.get('lit_scroll_speed', -1))
+        self.lit.scroll(self.settings.get('lit_scroll_speed', -1))
 
 
 class Jitter(LitBits):
     """ Light random pixels and slowly fade them. """
-    FILL_MODE_SOLID = 'solid'
-    FILL_MODE_MULTI = 'multi'
-
     def __init__(self, leds, fade_percent=40, sparking=25, background=0x0a0a0a,
                  lit_percent=15, fill_mode=None, **kwargs):
         """
@@ -156,7 +165,7 @@ class Jitter(LitBits):
         self.settings['fill_mode'] = fill_mode or self.FILL_MODE_MULTI
 
     def setup(self):
-        self.lit_bits.pct = self.settings['lit_percent']
+        self.lit.pct = self.settings['lit_percent']
         self.settings['background'] = trickLED.colval(self.settings['background'])
         if not self.generator:
             self.generator = generators.random_pastel(bpp=self.leds.bpp)
@@ -168,10 +177,10 @@ class Jitter(LitBits):
         fill_mode = self.settings.get('fill_mode')
         if rv < self.settings.get('sparking'):
             # sparking
-            self.lit_bits.randomize()
+            self.lit.randomize()
             spark_col = next(self.generator)
             for i in range(self.calc_n):
-                if self.lit_bits[i]:
+                if self.lit[i]:
                     if fill_mode == self.FILL_MODE_SOLID:
                         col = spark_col
                     else:
@@ -185,14 +194,14 @@ class Jitter(LitBits):
         else:
             # not sparking
             for i in range(self.calc_n):
-                if self.lit_bits[i]:
+                if self.lit[i]:
                     col = trickLED.blend(self.leds[i], bg, fade_percent)
                 else:
                     col = bg
                 self.leds[i] = col
 
 
-class GenScroll(AnimationBase):
+class NextGen(AnimationBase):
     """ Scroll the pixels filling the end with a color from a color generator.
         setting "blanks" will insert n blank pixels between each lit one.
     """
@@ -211,9 +220,8 @@ class GenScroll(AnimationBase):
     def setup(self):
         self.leds.fill(0)
         stripe_size = self.settings.get('stripe_size', 1)
-        if self.generator is None:
-            self.generator = generators.striped_color_wheel(stripe_size)
-        for i in range(self.calc_n):
+        blanks = self.settings['blanks']
+        for i in range(0, self.calc_n, blanks + 1):
             self.leds[i] = next(self.generator)
 
     def calc_frame(self):
@@ -233,11 +241,11 @@ class SideSwipe(AnimationBase):
     def __init__(self, leds, color_generators=None, **kwargs):
         super().__init__(leds, **kwargs)
         if color_generators:
-            self.color_generators = color_generators
+            self.generators = color_generators
         else:
-            self.color_generators = []
-            self.color_generators.append(generators.random_vivid())
-            self.color_generators.append(generators.striped_color_wheel(hue_stride=20, stripe_size=10))
+            self.generators = []
+            self.generators.append(generators.random_vivid())
+            self.generators.append(generators.striped_color_wheel(hue_stride=20, stripe_size=10))
 
     def setup(self):
         self.state['cycle'] = 0
@@ -246,7 +254,7 @@ class SideSwipe(AnimationBase):
         self.state['gen_idx'] = 0
         
     def calc_frame(self):
-        gen = self.color_generators[self.state['gen_idx']]
+        gen = self.generators[self.state['gen_idx']]
         self.leds[self.state['loc']] = next(gen)
         nloc = self.state['loc'] + self.state['direction']
         if 0 <= nloc < self.calc_n:
@@ -254,7 +262,7 @@ class SideSwipe(AnimationBase):
         else:
             # reached the end increment cycle and reverse direction
             self.state['cycle'] += 1
-            self.state['gen_idx'] = self.state['cycle'] % len(self.color_generators)
+            self.state['gen_idx'] = self.state['cycle'] % len(self.generators)
             self.state['direction'] *= -1
 
 
@@ -375,31 +383,36 @@ class Fire(AnimationBase):
             self.leds[i] = self.palette[self.heat_map[i] >> ps]
 
 
-class Congregate(AnimationBase):
+class Convergent(AnimationBase):
     """ Light marches two at a time and meets in the middle """
-    def setup(self, **kwargs):
+
+    def __init__(self, leds, fill_mode=None, **kwargs):
+        super().__init__(leds, **kwargs)
+        self.settings['fill_mode'] = fill_mode or self.FILL_MODE_SOLID
+
+    def setup(self):
         if self.palette is None:
             self.palette = default_palette(20)
         self.state['insert_points'] = [0, self.calc_n - 1]
-        self.state['cycle'] = 0
+        self.state['palette_idx'] = 0
         self.start_cycle()
 
     def start_cycle(self):
         self.state['movers'] = self.state['insert_points'][:]
-        self.state['cycle'] += 1
         self.leds.fill(0)
-        self.state['color'] = self.palette[self.state['cycle'] % len(self.palette)]
+        self.state['palette_idx'] = (self.state['palette_idx'] + 1) % len(self.palette)
+        self.state['color'] = self.palette[self.state['palette_idx']]
         for ip in self.state['insert_points']:
             self.leds[ip] = self.state['color']
 
     def calc_frame(self):
-        id = 1
+        idir = 1
         mvr = []
         new_insert = False
         new_cycle = False
         for mv in self.state['movers']:
-            ni = mv + id
-            id *= -1
+            ni = mv + idir
+            idir *= -1
             if 0 <= ni < self.calc_n:
                 if not any(self.leds[ni]):
                     self.leds[ni] = self.leds[mv]
@@ -410,11 +423,68 @@ class Congregate(AnimationBase):
                 else:
                     new_insert = True
             else:
-                print("{} + {} out of range".format(mv, id))
+                print("{} + {} out of range".format(mv, idir))
         if new_cycle:
             self.start_cycle()
             return
         if new_insert:
+            if self.settings['fill_mode'] == self.FILL_MODE_MULTI:
+                self.state['palette_idx'] = (self.state['palette_idx'] + 1) % len(self.palette)
+                self.state['color'] = self.palette[self.state['palette_idx']]
+            for ip in self.state['insert_points']:
+                self.leds[ip] = self.state['color']
+            mvr = self.state['insert_points'][:]
+        self.state['movers'] = mvr
+
+
+class Divergent(AnimationBase):
+
+    def __init__(self, leds, fill_mode=None, **kwargs):
+        super().__init__(leds, **kwargs)
+        self.settings['fill_mode'] = fill_mode or self.FILL_MODE_SOLID
+
+    def setup(self):
+        if self.palette is None:
+            self.palette = default_palette(20)
+        self.state['palette_idx'] = 0
+        hwp = self.calc_n // 2
+        self.state['insert_points'] = [hwp, hwp+1]
+        self.start_cycle()
+
+    def start_cycle(self):
+        self.state['movers'] = self.state['insert_points'][:]
+        self.leds.fill(0)
+        self.state['palette_idx'] = (self.state['palette_idx'] + 1) % len(self.palette)
+        self.state['color'] = self.palette[self.state['palette_idx']]
+        for ip in self.state['insert_points']:
+            self.leds[ip] = self.state['color']
+
+    def calc_frame(self):
+        idir = -1
+        mvr = []
+        new_insert = False
+        new_cycle = False
+        for mv in self.state['movers']:
+            ni = mv + idir
+            idir *= -1
+            if 0 <= ni < self.calc_n:
+                if not any(self.leds[ni]):
+                    self.leds[ni] = self.leds[mv]
+                    self.leds[mv] = 0
+                    mvr.append(ni)
+                elif mv in self.state['insert_points']:
+                    new_cycle = True
+                else:
+                    new_insert = True
+            else:
+                new_insert = True
+        if new_cycle:
+            self.start_cycle()
+            return
+        if new_insert:
+            if self.settings['fill_mode'] == self.FILL_MODE_MULTI:
+                self.state['palette_idx'] = (self.state['palette_idx'] + 1) % len(self.palette)
+                self.state['color'] = self.palette[self.state['palette_idx']]
             for ip in self.state['insert_points']:
                 self.leds[ip] = self.state['color']
             mvr = self.state['insert_points'][:]

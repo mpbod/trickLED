@@ -12,7 +12,7 @@ BITS_EVEN = const(85)            # 01010101
 BITS_ODD = const(170)            # 10101010
 BITS_NONE = const(0)             # 00000000
 BITS_ALL = const(255)            # 11111111
-BITS_ALL_32 = const(4294967295)  # 32 1s
+BITS_ALL_32 = const(1 << 32 - 1)  # 32 1s
 FADE_IN = const(1)
 FADE_OUT = const(2)
 FADE_IN_OUT = const(3)
@@ -50,46 +50,6 @@ def uint8(val):
         return 255
 
 
-def shift_color(col, steps):
-    # brighten or dim a color (1 = brighten, -1 = dim)
-    if steps > 0:
-        return tuple([uint8(c << steps) for c in col])
-    elif steps < 0:
-        return tuple([c >> -steps for c in col])
-    else:
-        return col
-
-
-def adjust_brightness(col, brightness=10):
-    """
-    Adjust brightness without converting to HSV
-
-    :param col: Color
-    :param brightness: Brightness 0-10
-    :return: color tuple
-    """
-    if 1 <= brightness <= 10:
-        if not any(col):
-            # black
-            mv = brightness * 25
-            return tuple(mv for v in col)
-        else:
-            lit = [1 if v > 0 else 0 for v in col]
-            max_val = max(col)
-            adj = brightness * 25 / max_val
-            val = []
-            for i in range(len(col)):
-                v = uint8(col[i] * adj)
-                if v == 0 and lit[i]:
-                    v = 1
-                val.append(v)
-            return tuple(val)
-    if brightness == 0:
-        return 0, 0, 0
-    else:
-        raise ValueError('brightness must be between 0 and 10')
-
-
 def add8(a, b):
     return uint8(a + b)
 
@@ -99,38 +59,19 @@ def mult8(a, b):
 
 
 def sin8(v):
-    """ """
+    """ Sin in 255 "degrees" """
     vr = v / 127.5 * math.pi
     return math.sin(vr)
 
 
-def rgb2hsv(col):
-    """
-    Convert RGB color to HSV. Hue is 255 "degrees" instead of 360. Saturation and value are also 0-255 instead of 0-1.0.
-
-    :param col: RGB color
-    :return: HSV color
-    """
-    col = colval(col)
-    r, g, b = col
-    max_v = max(col)
-    d = max_v - min(col)
-    if d == 0 or max_v == 0:
-        return 0, 0, max_v
-    s = d / max_v * 255
-    if r == max_v:
-        h = (g - b) / d
-    elif g == max_v:
-        h = 2 + (b - r) / d
-    else:
-        h = 4 + (r - g) / d
-    h *= 42.5
-    if h < 0:
-        h += 255
-    return uint8(h), uint8(s), max_v
+def cos8(v):
+    """ Cos in 255 "degrees" """
+    vr = v / 127.5 * math.pi
+    return math.cos(vr)
 
 
 def color_wheel(hue, val=255):
+    """ 255 degree color wheel. HSV but all at full saturation. """
     hue = uint8(hue) % 255
     pa = hue % 85
     ss = val / 85
@@ -145,19 +86,20 @@ def color_wheel(hue, val=255):
 
 
 def heat_color(temp):
-    """ """
-    t192 = temp * 191 // 255
-    heat_ramp = (t192 & 63) << 2
-    if t192 < 64:
+    """ Return loose approximation of black body radiation. """
+    # normalizing to 191 and using last 6 bits of that for heat_ramp was borrowed from FastLED
+    t191 = temp * 191 // 255
+    heat_ramp = (t191 & 63) << 2
+    if t191 < 64:
         return heat_ramp, 0, 0
-    elif t192 < 128:
+    elif t191 < 128:
         return 255, heat_ramp, 0
     else:
         return 255, 255, heat_ramp
 
 
 def rand32(pct):
-    """Return a random 32 bit int with approximate percentage of ones."""
+    """ Return a random 32 bit int with approximate percentage of ones."""
     # grb = random.getrandbits() ~ 50% 1's
     grb = getrandbits
     if pct < 1:
@@ -184,8 +126,25 @@ def rand32(pct):
         return grb(32) | grb(32) | grb(32) | grb(32)
 
 
+def randrange(low, high):
+    # esp8266 port doesn't have randrange (or bit_length)
+    d = high - low
+    bl = len(bin(d)) - 2
+    rn = getrandbits(bl) + low
+    if low <= rn <= high:
+        return rn
+    rv = rn & high
+    if low <= rv <= high:
+        return rv
+    rv = rn | low 
+    if low <= rv <= high:
+        return rv
+    return high
+      
+    
+
 def colval(val, bpp=3):
-    # allow the input of color values as ints (including hex) and None/0 for black
+    """ allow the input of color values as ints (including hex) and None/0 for black """
     if not val:
         val = (0,) * bpp
     elif isinstance(val, int):
@@ -213,10 +172,13 @@ class BitMap:
         self._mi = self.wc * 32
         # Hamming weight, rough percentage of ones when randomizing
         self.pct = pct
-        self.buf = bytearray(self.wc * 4)        
+        self.buf = bytearray(self.wc * 4)
+        self._po = 0
 
     def bit(self, idx, val=None):
         """ Get or set a single bit """
+        if self._po:
+            idx = (idx + self._po) % self.n 
         byte_idx = idx // 8
         bit_idx = idx % 8
         mask = 1 << bit_idx
@@ -241,32 +203,11 @@ class BitMap:
             raise IndexError('index out of range')
 
     def scroll(self, steps):
-        if steps > 0:
-            src_mask = 2 ** (32 - steps) - 1
-            src_shift = steps
-            fill_mask = BITS_ALL_32 - src_mask
-            fill_shift = steps - 32
-            fill_loc = -1
-        else:
-            fill_mask = 2 ** -steps - 1
-            fill_shift = 32 + steps
-            fill_loc = 1
-            src_mask = BITS_ALL_32 - fill_mask
-            src_shift = steps
-        if self.wc == 1:
-            fill_loc = 0
-        words = []
-        for i in range(self.wc):
-            val = struct.unpack('I', self.buf[i:i+4])[0]
-            words.append(val)
-        for i in range(self.wc):
-            fill_idx = (i + fill_loc) % self.wc
-            src = shift_bits((words[i] & src_mask), src_shift)
-            fill = shift_bits((words[fill_idx] & fill_mask), fill_shift)
-            self.buf[i * 4: i * 4 + 4] = struct.pack('I', src + fill)
+        self._po = (self._po - steps) % self.n
                   
     def randomize(self, pct=None):
         """ fill buffer with random 1s and 0s. Use pct to control the approx percent of 1s """
+        self._po = 0
         if pct is None:
             pct = self.pct
         buf = bytearray()
@@ -276,6 +217,7 @@ class BitMap:
 
     def repeat(self, val):
         """ fill buffer by repeating val """
+        self._po = 0
         if not isinstance(val, int) or val >= 1 << 32:
             raise ValueError('Value error must be int')
         if val < 256:
@@ -380,6 +322,12 @@ class ByteMap:
             self[start_pos + i] = val
         self[end_pos] = v2
 
+    def fill_gen(self, gen, start_pos=0, end_pos=None):
+        if end_pos is None or end_pos >= self.n:
+            end_pos = self.n - 1
+        for i in range(start_pos, end_pos + 1):
+            self[i] = next(gen)
+
 
 class TrickLED(NeoPixel):
     """ NeoPixels with benefits to aid in creating animations.
@@ -425,7 +373,7 @@ class TrickLED(NeoPixel):
         :param end_pos: End position, defaults to end of strip
         """
         if end_pos is None or end_pos >= self.n:
-            end_pos = self.n - 1
+            end_pos = (self.repeat_n or self.n) - 1
         for i in range(start_pos, end_pos + 1):
             self[i] = color
 
@@ -439,7 +387,7 @@ class TrickLED(NeoPixel):
         :param end_pos: End position, defaults to end of strip
         """
         if end_pos is None or end_pos >= self.n:
-            end_pos = self.n - 1
+            end_pos = (self.repeat_n or self.n) - 1
         steps = end_pos - start_pos
         col1 = colval(col1, self.bpp)
         col2 = colval(col2, self.bpp)
@@ -457,7 +405,7 @@ class TrickLED(NeoPixel):
         :param end_pos: End position, defaults to end of strip
         """
         if end_pos is None or end_pos >= self.n:
-            end_pos = self.n - 1
+            end_pos = (self.repeat_n or self.n) - 1
         for i in range(start_pos, end_pos + 1):
             self[i] = next(gen)
 
@@ -474,7 +422,7 @@ class TrickLED(NeoPixel):
         last_col = (0,) * self.bpp
         blend_col = (0,) * self.bpp
         if end_pos is None:
-            end_pos = self.n - 1
+            end_pos = (self.repeat_n or self.n) - 1
         for i in range(start_pos, end_pos + 1):
             if self[i] == blend_col:
                 continue
@@ -484,21 +432,6 @@ class TrickLED(NeoPixel):
                 last_col = self[i]
                 blend_col = blend(self[i], color, pct)
                 self[i] = blend_col
-
-    def adjust(self, shift=1, start_pos=0, end_pos=None):
-        """
-        Brighten or dim each pixel from start position to end position.
-
-        :param shift: Number of steps to shift each channel. 1 doubles all values -1 halves them
-        :param start_pos: Start position, defaults to beginning of strip
-        :param end_pos: End position, defaults to end of strip
-        """
-        if shift < -7 or shift > 7:
-            raise ValueError('shift must be between -7 and 7')
-        if end_pos is None or end_pos >= self.n:
-            end_pos = self.n - 1
-        for i in range(start_pos, end_pos + 1):
-            self[i] = tuple(shift_bits(x, shift) for x in self[i])
 
     def _repeat_stripe(self, n=None):
         """
@@ -544,9 +477,9 @@ class TrickLED(NeoPixel):
 
 class TrickMatrix(NeoPixel):
     # All rows run in the same direction
-    LAYOUT_STRAIGHT =  const(1)
+    LAYOUT_STRAIGHT = const(1)
     # Direction of rows alternate from right to left
-    LAYOUT_SNAKE = 2
+    LAYOUT_SNAKE = const(2)
     
     def __init__(self, pin, width, height, shape=None, **kwargs):
         if shape is None:

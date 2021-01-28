@@ -34,11 +34,6 @@ class TrickLEDTest(unittest.TestCase):
         si = trickLED.step_inc(self.c1, self.c2, 10)
         self.assertEqual((-15.0, 10.0, 5.0), si, 'incorrect step increment')
 
-    def test_adjust_brightness(self):
-        col = (200, 50, 5)
-        val = trickLED.adjust_brightness(col, 10)
-        self.assertEqual(250, val[0], 'brightness=10 was not 250')
-
     def test_color_wheel(self):
         # wheel is adjusted to 255 instead of 360
         c = trickLED.color_wheel(0, 255)
@@ -58,17 +53,6 @@ class TrickLEDTest(unittest.TestCase):
         self.assertEqual(0, trickLED.uint8(-10), 'negative int8 value should return 0')
         self.assertEqual(100, trickLED.uint8(100.0), 'int8 should return return int')
         self.assertEqual(255, trickLED.uint8(256.0)), 'int8 should return maximum of 255'
-
-    def test_rand32(self):
-        fmt = '{:032b}'
-        v = trickLED.rand32(0)
-        self.assertEqual(v, 0, 'rand32(0) should return 0')
-        for i in range(12, 100, 12):
-            v = trickLED.rand32(i)
-            e = int(32 * i / 100)
-            c = fmt.format(v).count('1')
-            d = abs(c - e)
-            self.assertLess(d, 6, f'rand32({i}) expected to return {e} 1s but got {c}')
 
     def test_colval(self):
         v = trickLED.colval(0xc86432)
@@ -107,10 +91,12 @@ class TrickLEDTest(unittest.TestCase):
         self.assertEqual(16, len(bm.buf), 'buffer length changed during 4 byte repeat')
         self.assertEqual(bm.buf[0], bm.buf[12], 'bits were not repeated correctly')
 
-        bm.scroll(-1)
-        self.assertEqual(128, bm.buf[0], 'incorrect value for scroll(-1)')
-        bm.scroll(9)
-        self.assertEqual(255, bm.buf[0], 'incorrect value for scroll(9')
+        bm.repeat(255) # fill with 1s
+        bm[0] = 0
+        bm.scroll(1)
+        self.assertEqual(0, bm[1], 'incorrect value for scroll(1)')
+        bm.scroll(-101)
+        self.assertEqual(0, bm[0], 'incorrect value for scroll(-1)')
 
     def test_byte_map(self):
         bm = trickLED.ByteMap(30)

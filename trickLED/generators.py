@@ -1,5 +1,9 @@
 from . import trickLED
-from random import getrandbits, randrange
+from random import getrandbits 
+try:
+    from random import randrange
+except ImportError:
+    randrange = trickLED.randrange
 
 
 def stepped_color_wheel(hue_stride=10, stripe_size=20, brightness=255, start_hue=0):
@@ -17,10 +21,10 @@ def stepped_color_wheel(hue_stride=10, stripe_size=20, brightness=255, start_hue
         hue_stride = 1
     hue = start_hue
     db = brightness >> 2
-    ho = hue_stride / -2
+    ho = hue_stride // -2
     while True:
         c1 = trickLED.color_wheel(hue, brightness)
-        c2 = trickLED.color_wheel(hue - hue_stride, db)
+        c2 = trickLED.color_wheel((hue - ho) % 255, db)
         inc = trickLED.step_inc(c1, c2, stripe_size - 1)
         for i in range(stripe_size):
             incs = [v * i for v in inc]
@@ -48,7 +52,7 @@ def striped_color_wheel(hue_stride=10, stripe_size=10, brightness=255, start_hue
         hue = (hue + hue_stride) % 255
 
 
-def fading_color_wheel(hue_stride=10, stripe_size=20, start_hue=0, mode=trickLED.FADE_IN_OUT):
+def fading_color_wheel(hue_stride=10, stripe_size=20, start_hue=0, mode=trickLED.FADE_OUT):
     """
     Cycle through color wheel while fading in and out before moving to next hue.
 
@@ -58,18 +62,22 @@ def fading_color_wheel(hue_stride=10, stripe_size=20, start_hue=0, mode=trickLED
     :param mode: Fade in, fade out, fade in then out
     :return: color generator
     """
+    if stripe_size <= 1:
+        raise ValueError('stripe_size must be > 1 to fade')
     hue = start_hue
+    # calculate brightness values
     if mode == trickLED.FADE_IN_OUT:
-        cs = 128 / stripe_size
+        cs = 127.5 / (stripe_size - 1)
         co = 0
-    elif mode == trickLED.FADE_IN:
-        cs = 64 / stripe_size
-        co = 0
+        bv = [2 + int(trickLED.sin8(co + i * cs) * 253) for i in range(stripe_size)]
     else:
-        cs = 64 / stripe_size
-        co = 64
-    # brightness values
-    bv = [5 + int(trickLED.sin8(co + i * cs) * 250) for i in range(stripe_size)]
+        if mode == trickLED.FADE_IN:
+            cs = 63.75 / (stripe_size - 1)
+            co = 63.75
+        else:
+            cs = 63.75 / (stripe_size - 1)
+            co = 0
+        bv = [255 - int(trickLED.sin8(co + i * cs) * 253) for i in range(stripe_size)]
     if hue_stride == 0:
         hue_stride = 1
     while True:
