@@ -21,7 +21,7 @@ def stepped_color_wheel(hue_stride=10, stripe_size=20, brightness=255, start_hue
         hue_stride = 1
     hue = start_hue
     db = brightness >> 2
-    ho = hue_stride // -2
+    ho = - hue_stride
     while True:
         c1 = trickLED.color_wheel(hue, brightness)
         c2 = trickLED.color_wheel((hue - ho) % 255, db)

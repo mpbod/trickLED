@@ -1,6 +1,11 @@
 ## Purpose ##
-Provide a framework for doing addressable LED animations in Micropython. This is not going
-to be as fast or efficient as the FastLED for Arduino. 
+Provide a framework for doing addressable LED animations in Micropython. This is not as fast
+or efficient as the FastLED for Arduino. But it is pretty easy to create your own custom animation. 
+And many of the animations use Python generators for their colors.  You can make a custom 
+animation by writing a color generator and passing it to an animation class like NextGen or SideSwipe.
+Most of the included color generators are a dozen lines of code or less.
+
+Watch the [demo video](https://www.youtube.com/watch?v=vLvrJPNvkvU) showing the available animations and color generators.
 
 ### Hardware Support 
 It currently supports the ESP32. It runs on the ESP8266, but only with the precompiled byte code. 
@@ -35,9 +40,9 @@ If you are running on an ESP8266, copy over the *.mpy files instead of *.py.
 
 ### Animation Examples
 All animations are subclassed from the AnimationBase class. When making a new animation
-you typically override the setup, and calc_frame methods. Additional keyword arguments
-are automatically added to the self.settings dict. All runtime info should be stored in the
-self.state dict.
+you typically override the setup, and calc_frame methods. Additional keyword arguments to 
+__init__() and play() are automatically added to the self.settings dict. 
+All runtime info should be stored in the self.state dict.
 
     ani = animations.Fire(tl, interval=40)
     # settings can also be set by passing as keyword arguments to play()

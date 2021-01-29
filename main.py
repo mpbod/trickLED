@@ -74,6 +74,11 @@ def demo_animations(leds, n_frames=200):
     play(ani, n_frames)
     print('Convergent settings: fill_mode=FILL_MODE_MULTI')
     play(ani, n_frames, fill_mode=ani.FILL_MODE_MULTI)
+
+    # Conjuction
+    ani = animations.Conjunction(leds)
+    print('Conjuction settings: default')
+    play(ani, n_frames)
     
     if leds.repeat_n != leds_repeat_n:
         leds.repeat_n = leds_repeat_n
@@ -135,5 +140,7 @@ if __name__ == '__main__':
         led_pin = machine.Pin(4)
 
     tl = trickLED.TrickLED(led_pin, 12)
-    demo_animations(tl, 100)
-    demo_generators(tl, 100)
+    # demo_animations(tl, 100)
+    # demo_generators(tl, 100)
+
+    play(ani, 200)

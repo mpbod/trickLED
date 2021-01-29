@@ -322,11 +322,15 @@ class ByteMap:
             self[start_pos + i] = val
         self[end_pos] = v2
 
-    def fill_gen(self, gen, start_pos=0, end_pos=None):
+    def fill_gen(self, gen, start_pos=0, end_pos=None, direction=1):
         if end_pos is None or end_pos >= self.n:
             end_pos = self.n - 1
-        for i in range(start_pos, end_pos + 1):
-            self[i] = next(gen)
+        if direction > 0:
+            for i in range(start_pos, end_pos + 1):
+                self[i] = next(gen)
+        else:
+            for i in range(end_pos, start_pos - 1, -1):
+                self[i] = next(gen)
 
 
 class TrickLED(NeoPixel):
@@ -397,17 +401,22 @@ class TrickLED(NeoPixel):
             self[start_pos + i] = col
         self[end_pos] = col2
 
-    def fill_gen(self, gen, start_pos=0, end_pos=None):
+    def fill_gen(self, gen, start_pos=0, end_pos=None, direction=1):
         """
         Fill strip with with colors from a generator.
         :param gen: Color generator
         :param start_pos: Start position, defaults to beginning of strip
         :param end_pos: End position, defaults to end of strip
+        :param direction:
         """
         if end_pos is None or end_pos >= self.n:
             end_pos = (self.repeat_n or self.n) - 1
-        for i in range(start_pos, end_pos + 1):
-            self[i] = next(gen)
+        if direction > 0:
+            for i in range(start_pos, end_pos + 1):
+                self[i] = next(gen)
+        else:
+            for i in range(end_pos, start_pos - 1, -1):
+                self[i] = next(gen)
 
     def blend_to_color(self, color=0, pct=50, start_pos=0, end_pos=None):
         """
