@@ -140,7 +140,5 @@ if __name__ == '__main__':
         led_pin = machine.Pin(4)
 
     tl = trickLED.TrickLED(led_pin, 12)
-    # demo_animations(tl, 100)
-    # demo_generators(tl, 100)
-
-    play(ani, 200)
+    demo_animations(tl, 100)
+    demo_generators(tl, 100)
