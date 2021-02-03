@@ -16,6 +16,20 @@ BITS_ALL_32 = const(1 << 32 - 1)  # 32 1s
 FADE_IN = const(1)
 FADE_OUT = const(2)
 FADE_IN_OUT = const(3)
+FILL_MODE_MULTI = const(4)
+FILL_MODE_SOLID = const(5)
+
+global_setings = {
+    'brightness': 200,
+    'interval': 60,
+    'palette': None,
+    'animation': None
+}
+
+global_state = {
+    'audio_intensity': None,
+    'audio_peak': None,
+}
 
 
 def blend(col1, col2, pct=50):
@@ -255,7 +269,7 @@ class ByteMap:
     Map some number of bytes to items. Values automatically wrap around instead of throwing index errors.
     Use for color palettes or keeping track of things like temperature during animations.
     """
-    def __init__(self, n, bpi=3):
+    def __init__(self, n, bpi=3, order=(1,0,2)):
         """
         :param n: Number of items
         :param bpi: bytes per item
@@ -263,6 +277,7 @@ class ByteMap:
         self.n = n
         self.bpi = bpi
         self.buf = bytearray(n * bpi)
+        self.order = order
 
     def __setitem__(self, key, value):
         value = bytes(colval(value, self.bpi))
@@ -296,8 +311,53 @@ class ByteMap:
                 step = key.step
             return self.buf[si:ei:step]
 
+    def get_ordered_item(self, key):
+        # get item in proper order to write to led buffer
+        si = key * self.bpi
+        return bytearray(self.buf[si + i] for i in self.order)
+
     def __len__(self):
         return self.n
+
+    def append(self, val):
+        self.buf.append(val)
+        self.n += 1
+
+    def extend(self, vals):
+        self.buf.extend(vals)
+        self.n = len(self.buf) // self.bpi
+
+    def add(self, val):
+        if isinstance(val, (list, tuple)):
+            if len(val) < self.bpi:
+                raise ValueError('Length of value to add must match byte size.')
+            self.buf = bytearray([uint8(self.buf[i] + val[i % self.bpi]) for i in range(self.n * self.bpi)])
+        else:
+            self.buf = bytearray([uint8(v + val) for v in self.buf])
+
+    def sub(self, val):
+        if isinstance(val, (list, tuple)):
+            if len(val) < self.bpi:
+                raise ValueError('Length of value to sub must match byte size.')
+            self.buf = bytearray([uint8(self.buf[i] - val[i % self.bpi]) for i in range(self.n * self.bpi)])
+        else:
+            self.buf = bytearray([uint8(v - val) for v in self.buf])
+
+    def mul(self, val):
+        if isinstance(val, (list, tuple)):
+            if len(val) < self.bpi:
+                raise ValueError('Length of value to multiply must match byte size.')
+            self.buf = bytearray([uint8(self.buf[i] * val[i % self.bpi]) for i in range(self.n * self.bpi)])
+        else:
+            self.buf = bytearray([uint8(v * val) for v in self.buf])
+
+    def div(self, val):
+        if isinstance(val, (list, tuple)):
+            if len(val) < self.bpi:
+                raise ValueError('Length of value to divide must match byte size.')
+            self.buf = bytearray([uint8(self.buf[i] // val[i % self.bpi]) for i in range(self.n * self.bpi)])
+        else:
+            self.buf = bytearray([uint8(v // val) for v in self.buf])
 
     def scroll(self, step=1):
         cut = self.bpi * -step
@@ -359,6 +419,10 @@ class TrickLED(NeoPixel):
             super().__setitem__(i, val)
         else:
             raise IndexError('Assignment index out of range')
+
+    def _rgb_to_order(self, col):
+        """ Convert RGB value to byte order of LEDs """
+        return [col[self.ORDER[i]] for i in range(self.bpp)]
 
     def scroll(self, step=1):
         """ Scroll the pixels some number of steps in the given direction.
@@ -441,6 +505,54 @@ class TrickLED(NeoPixel):
                 last_col = self[i]
                 blend_col = blend(self[i], color, pct)
                 self[i] = blend_col
+
+    def add(self, val):
+        bpp = self.bpp
+        mi = self.repeat_n or self.n
+        if isinstance(val, (list, tuple)):
+            if len(val) < bpp:
+                raise ValueError('Length of value to add must match bpp')
+            # convert RGB to string byte order
+            val = self._rgb_to_order(val)
+            self.buf = bytearray([uint8(self.buf[i] + val[i % bpp]) for i in range(mi * bpp)])
+        else:
+            self.buf = bytearray([uint8(self.buf[i] + val) for i in range(mi * bpp)])
+
+    def sub(self, val):
+        bpp = self.bpp
+        mi = self.repeat_n or self.n
+        if isinstance(val, (list, tuple)):
+            if len(val) < bpp:
+                raise ValueError('Length of value to subtract must match bpp')
+            # convert RGB to string byte order
+            val = self._rgb_to_order(val)
+            self.buf = bytearray([uint8(self.buf[i] - val[i % bpp]) for i in range(mi * bpp)])
+        else:
+            self.buf = bytearray([uint8(self.buf[i] - val) for i in range(mi * bpp)])
+
+    def mul(self, val):
+        bpp = self.bpp
+        mi = self.repeat_n or self.n
+        if isinstance(val, (list, tuple)):
+            if len(val) < bpp:
+                raise ValueError('Length of value to multiply must match bpp')
+            # convert RGB to string byte order
+            val = self._rgb_to_order(val)
+            self.buf = bytearray([uint8(self.buf[i] * val[i % bpp]) for i in range(mi * bpp)])
+        else:
+            self.buf = bytearray([uint8(self.buf[i] * val) for i in range(mi * bpp)])
+
+    def div(self, val):
+        bpp = self.bpp
+        mi = self.repeat_n or self.n
+        if isinstance(val, (list, tuple)):
+            if len(val) < bpp:
+                raise ValueError('Length of value to multiply must match bpp')
+            # convert RGB to string byte order
+            val = self._rgb_to_order(val)
+            self.buf = bytearray([uint8(self.buf[i] / val[i % bpp]) for i in range(mi * bpp)])
+        else:
+            self.buf = bytearray([uint8(self.buf[i] / val) for i in range(mi * bpp)])
 
     def _repeat_stripe(self, n=None):
         """

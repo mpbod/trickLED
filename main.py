@@ -1,5 +1,10 @@
 import machine
+import network
+import time
+import settings
+import socket
 import sys
+
 try:
     import uasyncio as asyncio
 except ImportError:
@@ -8,6 +13,22 @@ except ImportError:
 import trickLED
 from trickLED import animations
 from trickLED import generators
+from trickLED.testing import timeit
+
+
+def connect(ssid, password, timeout=30):
+    """  Connect to WiFi network  """
+    timeout_tm = time.time() + timeout
+    sta = network.WLAN(network.STA_IF)
+    sta.active(True)
+    sta.connect(ssid, password)
+    while not sta.isconnected():
+        if time.time() > timeout_tm:
+            print('Could not connect to network')
+            return sta
+    ip = sta.ifconfig()[0]
+    print('Connected to %s on %s' % (ssid, ip))
+    return sta
 
 
 def play(animation, n_frames, **kwargs):
@@ -19,6 +40,9 @@ def play(animation, n_frames, **kwargs):
     finally:
         # needed to reset state otherwise the animations will get all jumbled when ended with CTRL+C
         asyncio.new_event_loop()
+        animation.leds.fill(0)
+        animation.leds.write()
+        time.sleep(1)
 
 
 def demo_animations(leds, n_frames=200):
@@ -45,7 +69,7 @@ def demo_animations(leds, n_frames=200):
     play(ani, n_frames)
     print('Jitter settings: background=0x020212, fill_mode=FILL_MODE_SOLID')
     ani.generator = generators.random_vivid()
-    play(ani, n_frames, background=0x020212, fill_mode=ani.FILL_MODE_SOLID)
+    play(ani, n_frames, background=0x020212, fill_mode=trickLED.FILL_MODE_SOLID)
     
     # SideSwipe
     ani = animations.SideSwipe(leds)
@@ -66,14 +90,14 @@ def demo_animations(leds, n_frames=200):
     print('Divergent settings: default')
     play(ani, n_frames)
     print('Divergent settings: fill_mode=FILL_MODE_MULTI')
-    play(ani, n_frames, fill_mode=ani.FILL_MODE_MULTI)
+    play(ani, n_frames, fill_mode=trickLED.FILL_MODE_MULTI)
     
     # Convergent
     ani = animations.Convergent(leds)
     print('Convergent settings: default')
     play(ani, n_frames)
     print('Convergent settings: fill_mode=FILL_MODE_MULTI')
-    play(ani, n_frames, fill_mode=ani.FILL_MODE_MULTI)
+    play(ani, n_frames, fill_mode=trickLED.FILL_MODE_MULTI)
 
     # Conjuction
     ani = animations.Conjunction(leds)
@@ -131,6 +155,18 @@ def demo_generators(leds, n_frames=200):
     ani.generator = generators.random_pastel(mask=(0, 63, 63))
     play(ani, n_frames)
 
+def sock_stream_handler(data):
+
+
+def main():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(('', 5580))
+    sock.listen(5)
+    while True:
+        cxn, addr = sock.accept()
+        print('Connection from {}'.format(addr))
+        cxn.send(b'Welcome')
+
 
 if __name__ == '__main__':
     if sys.platform == 'esp32':
@@ -139,6 +175,10 @@ if __name__ == '__main__':
         # labeled D2 on most ESP8266 boards
         led_pin = machine.Pin(4)
 
-    tl = trickLED.TrickLED(led_pin, 12)
-    demo_animations(tl, 100)
-    demo_generators(tl, 100)
+    sta = connect(settings.SSID, settings.WIFI_PWD)
+    tl = trickLED.TrickLED(led_pin, 60)
+    """
+    while True:
+        demo_animations(tl, 150)
+        demo_generators(tl, 150)
+    """

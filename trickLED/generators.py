@@ -6,23 +6,24 @@ except ImportError:
     randrange = trickLED.randrange
 
 
-def stepped_color_wheel(hue_stride=10, stripe_size=20, brightness=255, start_hue=0):
+def stepped_color_wheel(hue_stride=10, stripe_size=20, start_hue=0):
     """
     Generator that cycles through the color wheel creating stripes that fade to
     a slightly different hue.
 
     :param hue_stride: Number of steps on the color wheel to skip, negative will go in reverse.
     :param stripe_size: Size of fading stripe
-    :param brightness: Brightness 0-255
     :param start_hue: Starting hue on color wheel
     :return: color generator
     """
     if hue_stride == 0:
         hue_stride = 1
     hue = start_hue
-    db = brightness >> 2
+
     ho = - hue_stride
     while True:
+        brightness = trickLED.global_setings.get('brightness')
+        db = brightness >> 2
         c1 = trickLED.color_wheel(hue, brightness)
         c2 = trickLED.color_wheel((hue - ho) % 255, db)
         inc = trickLED.step_inc(c1, c2, stripe_size - 1)
@@ -32,13 +33,12 @@ def stepped_color_wheel(hue_stride=10, stripe_size=20, brightness=255, start_hue
         hue = (hue + hue_stride) % 255
 
 
-def striped_color_wheel(hue_stride=10, stripe_size=10, brightness=255, start_hue=0):
+def striped_color_wheel(hue_stride=10, stripe_size=10, start_hue=0):
     """
     Generator that cycles through the color wheel creating stripes of the same color before moving to next hue.
 
     :param hue_stride: Number of steps on the color wheel to skip, negative will go in reverse.
     :param stripe_size: Number of times to repeat each color
-    :param brightness: Brightness (0-255)
     :param start_hue: Starting hue on color wheel
     :return: color generator
     """
@@ -46,7 +46,7 @@ def striped_color_wheel(hue_stride=10, stripe_size=10, brightness=255, start_hue
     if hue_stride == 0:
         hue_stride = 1
     while True:
-        col = trickLED.color_wheel(hue, brightness)
+        col = trickLED.color_wheel(hue, trickLED.global_setings.get('brightness'))
         for i in range(stripe_size):
             yield col
         hue = (hue + hue_stride) % 255
@@ -86,37 +86,36 @@ def fading_color_wheel(hue_stride=10, stripe_size=20, start_hue=0, mode=trickLED
         hue = (hue + hue_stride) % 255
 
 
-def color_compliment(hue_stride=10, stripe_size=1, start_hue=0, brightness=200):
+def color_compliment(hue_stride=10, stripe_size=1, start_hue=0):
     """
     Step through color wheel alternating between a color and its compliment
 
     :param hue_stride:
     :param stripe_size: Number of times to repeat each color
     :param start_hue: Location on color wheel to begin
-    :param brightness:  Brightness 0-255
     :return color generator
     """
     hue = start_hue
     while True:
-        col = trickLED.color_wheel(hue, brightness)
+        col = trickLED.color_wheel(hue, trickLED.global_setings.get('brightness'))
         for i in range(stripe_size):
             yield col
-        col = trickLED.color_wheel((hue + 127) % 255, brightness)
+        col = trickLED.color_wheel((hue + 127) % 255, trickLED.global_setings.get('brightness'))
         for i in range(stripe_size):
             yield col
         hue = (hue + hue_stride) % 255
 
 
-def random_vivid(brightness=200):
+def random_vivid():
     """
     Generate random vivid colors by filling only 2 channels.
-    :param brightness: Brightness 0-255
     :return: color generator
     """
     shifts = ((16, 8),  # (p, s, 0)  red-yellow-green
               (8, 0),   # (0, p, s)  green-aqua-blue
               (0, 16))  # (s, 0, p)  blue-purple-red
     while True:
+        brightness = trickLED.global_setings.get('brightness')
         cov = randrange(0, 2)
         prime = randrange(1, brightness)
         second = brightness - prime

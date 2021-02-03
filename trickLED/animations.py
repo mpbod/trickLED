@@ -8,16 +8,12 @@ try:
 except ImportError:
     randrange = trickLED.randrange
 
-try:
-    import uasyncio as asyncio
-except ImportError:
-    import asyncio
-
 
 def default_palette(n, brightness=200):
+    """ Generate a color palette by stepping through the color wheel """
     rn = getrandbits(8)
-    pal = trickLED.ByteMap(n)
-    sa = 255 // n
+    pal = trickLED.ByteMap(n, 3)
+    sa = min(255 // n, 30)
     for i in range(n):
         pal[i] = trickLED.color_wheel((rn + sa * i) % 255, brightness)
     return pal
@@ -25,8 +21,6 @@ def default_palette(n, brightness=200):
 
 class AnimationBase:
     """ Animation base class. """
-    FILL_MODE_SOLID = 'solid'
-    FILL_MODE_MULTI = 'multi'
 
     def __init__(self, leds, interval=50, palette=None, generator=None, brightness=200, **kwargs):
         """
@@ -55,6 +49,35 @@ class AnimationBase:
             self.calc_n = self.leds.n
         for kw in kwargs:
             self.settings[kw] = kwargs[kw]
+
+    @property
+    def palette(self):
+        return self.__palette
+
+    @palette.setter
+    def palette(self, val):
+        bpp = self.leds.bpp
+        if val is None:
+            self.__palette = None
+            return
+        if isinstance(val, trickLED.ByteMap):
+            # passed ByteMap
+            pal = val
+        elif isinstance(val, (tuple, list)):
+            if isinstance(val[0], int) and val[0] < 255:
+                # passed a single color
+                values = trickLED.colval(val)
+            else:
+                # passed a
+                values = [vi for color in val for vi in color]
+            pal = trickLED.ByteMap(0, bpp)
+            pal.extend(values)
+        elif isinstance(val, int) and val > 255:
+            pal = trickLED.ByteMap(1, bpp)
+            pal[0] = trickLED.colval(val, bpp)
+        else:
+            raise ValueError('Invalid type for palette {}'.format(val.__class__.__name__))
+        self.__palette = pal
 
     def setup(self):
         """ Called once at the start of animation.  """
@@ -99,6 +122,55 @@ class AnimationBase:
         print('Actual fps: {:0.02f} - interval fps: {:0.02f}\n'.format(fps, ifps))
 
 
+class NextGen(AnimationBase):
+    """ Simple animation that animates a color generator by scrolling and
+        feeding a new color in one frame at a time.
+        Setting "blanks" will insert n blank pixels between each lit one.
+    """
+    def __init__(self, leds, generator=None, blanks=0, scroll_speed=1, **kwargs):
+        """
+        :param leds: TrickLED object
+        :param generator: Color generator
+        :param blanks: Number of blanks to insert between colors
+        :param scroll_speed: 1 to scroll forward, -1 to scroll back
+        :param kwargs:
+        """
+        if generator is None:
+            generator = generators.striped_color_wheel(hue_stride=10, stripe_size=1)
+        super().__init__(leds, generator=generator, **kwargs)
+        self.settings['blanks'] = int(blanks)
+        self.settings['scroll_speed'] = int(scroll_speed)
+
+    def setup(self):
+        self.leds.fill(0)
+        stripe_size = self.settings.get('stripe_size', 1)
+        blanks = self.settings['blanks']
+        # limit scrolling to either 1 or -1
+        if self.settings['scroll_speed'] not in (-1, 1):
+            self.settings['scroll_speed'] = min(max(self.settings['scroll_speed'], -1), 1) or 1
+        # pre-fill the strip. Go in the opposite direction we are scrolling
+        if self.settings['scroll_speed'] < 0:
+            self.state['insert_point'] = self.calc_n - 1
+            for i in range(0, self.calc_n, blanks + 1):
+                self.leds[i] = next(self.generator)
+        else:
+            self.state['insert_point'] = 0
+            for i in range(self.calc_n - 1, -1,  -1):
+                self.leds[i] = next(self.generator)
+
+    def calc_frame(self):
+        self.leds.scroll(self.settings['scroll_speed'])
+        if self.settings.get('blanks'):
+            cl = self.settings.get('blanks') + 1
+            if self.frame % cl == 0:
+                col = next(self.generator)
+            else:
+                col = 0
+        else:
+            col = next(self.generator)
+        self.leds[self.state['insert_point']] = col
+
+
 class LitBits(AnimationBase):
     """ Animation where only some pixels are lit.  You can scroll the colors and lit_bits independently at different
         speeds or in different directions. If you set lit_percent the lit pixels will be random instead of a
@@ -124,7 +196,7 @@ class LitBits(AnimationBase):
 
     def setup(self):
         if self.palette is None:
-            self.palette = default_palette(20)
+            self.palette = default_palette(20, self.settings.get('brightness', 200))
         if self.settings.get('lit_percent'):
             self.lit.pct = self.settings.get('lit_percent')
             self.lit.randomize()
@@ -162,7 +234,7 @@ class Jitter(LitBits):
         self.settings['sparking'] = sparking
         self.settings['background'] = background
         self.settings['lit_percent'] = lit_percent
-        self.settings['fill_mode'] = fill_mode or self.FILL_MODE_MULTI
+        self.settings['fill_mode'] = fill_mode or trickLED.FILL_MODE_MULTI
 
     def setup(self):
         self.lit.pct = self.settings['lit_percent']
@@ -181,7 +253,7 @@ class Jitter(LitBits):
             spark_col = next(self.generator)
             for i in range(self.calc_n):
                 if self.lit[i]:
-                    if fill_mode == self.FILL_MODE_SOLID:
+                    if fill_mode == trickLED.FILL_MODE_SOLID:
                         col = spark_col
                     else:
                         col = next(self.generator)
@@ -199,54 +271,6 @@ class Jitter(LitBits):
                 else:
                     col = bg
                 self.leds[i] = col
-
-
-class NextGen(AnimationBase):
-    """ Scroll the pixels filling the end with a color from a color generator.
-        setting "blanks" will insert n blank pixels between each lit one.
-    """
-    def __init__(self, leds, generator=None, blanks=0, scroll_speed=1, **kwargs):
-        """
-        :param leds: TrickLED object
-        :param generator: Color generator
-        :param blanks: Number of blanks to insert between colors
-        :param scroll_speed: 1 to scroll forward, -1 to scroll back
-        :param kwargs:
-        """
-        if generator is None:
-            generator = generators.striped_color_wheel(hue_stride=10, stripe_size=1)
-        super().__init__(leds, generator=generator, **kwargs)
-        self.settings['blanks'] = int(blanks)
-        self.settings['scroll_speed'] = int(scroll_speed)
-
-    def setup(self):
-        self.leds.fill(0)
-        stripe_size = self.settings.get('stripe_size', 1)
-        blanks = self.settings['blanks']
-        # limit scrolling to either 1 or -1
-        if self.settings['scroll_speed'] not in (-1, 1):
-            self.settings['scroll_speed'] = min(max(self.settings['scroll_speed'], -1), 1) or 1
-        # fill in the opposite direction we as scrolling
-        if self.settings['scroll_speed'] < 0:
-            self.state['insert_point'] = self.calc_n - 1
-            for i in range(0, self.calc_n, blanks + 1):
-                self.leds[i] = next(self.generator)
-        else:
-            self.state['insert_point'] = 0
-            for i in range(self.calc_n - 1, -1,  -1):
-                self.leds[i] = next(self.generator)
-
-    def calc_frame(self):
-        self.leds.scroll(self.settings['scroll_speed'])
-        if self.settings.get('blanks'):
-            cl = self.settings.get('blanks') + 1
-            if self.frame % cl == 0:
-                col = next(self.generator)
-            else:
-                col = 0
-        else:
-            col = next(self.generator)
-        self.leds[self.state['insert_point']] = col
 
 
 class SideSwipe(AnimationBase):
@@ -279,132 +303,17 @@ class SideSwipe(AnimationBase):
             self.state['direction'] *= -1
 
 
-class Fire(AnimationBase):
-    def __init__(self, leds, sparking=64, cooling=15, scroll_speed=1, hotspots=1, **kwargs):
-        """
-        :param leds: TrickLED object
-        :param sparking: Odds / 255 of generating a new spark
-        :param cooling: How much the flames are cooled.
-        :param scroll_speed: Speed and direction that flames move.
-        :param hotspots: Number of spark locations. One will always be placed on the edge.
-        :param kwargs:
-        """
-        super().__init__(leds, **kwargs)
-        self.heat_map = trickLED.ByteMap(leds.n, bpi=1)
-        # Blend map keeps track of which positions need blended
-        self._blend_map = trickLED.BitMap(self.calc_n)
-        self.settings['sparking'] = sparking
-        self.settings['cooling'] = cooling
-        self.settings['scroll_speed'] = int(scroll_speed)
-        self.settings['hotspots'] = max(hotspots, 1)
-        # we map 256 heat levels to a palette of 64, 128 or 256, calculated in setup()
-        self.settings['palette_shift'] = 0
-        self._flash_points = None
-        if 'palette' in kwargs:
-            if len(kwargs['palette']) >= 64:
-                self.palette = kwargs['palette']
-            else:
-                raise ValueError('Palette length should be at least 64')
-        else:
-            self.palette = trickLED.ByteMap(64, bpi=3)
-            for i in range(64):
-                self.palette[i] = trickLED.heat_color(i * 4)
-
-    def setup(self):
-        self.heat_map.fill(0)
-        # add insertion points and calculate ranges to blend
-        self._flash_points = set()
-        if self.settings['scroll_speed'] > 0:
-            # fire ascending
-            self._flash_points.add(0)
-            bmin = 0
-            bmax = 11
-        elif self.settings['scroll_speed'] < 0:
-            # fire descending
-            self._flash_points.add(self.calc_n - 1)
-            bmin = -10
-            bmax = 1
-        else:
-            self._flash_points.add(randrange(0, self.calc_n - 1))
-            bmin = -5
-            bmax = 6
-
-        sect_size = self.calc_n // self.settings['hotspots']
-        for i in range(1, self.settings['hotspots']):
-            # add additional flash_points with some randomness so they are not exactly evenly spaced
-            rn = getrandbits(4) - 8
-            ip = sect_size * i + rn
-            if not 0 < ip < self.calc_n:
-                ip = min(max(ip, 0), self.calc_n - 1)
-            self._flash_points.add(ip)
-
-        # calculate blend_map
-        self._blend_map.repeat(0)
-        for fp in self._flash_points:
-            for i in range(fp + bmin, fp + bmax):
-                if 0 <= i < self.calc_n and i not in self._flash_points:
-                    self._blend_map[i] = 1
-
-        # determine if we are mapping 256 levels of heat to 64, 128 or 256 colors
-        if len(self.palette) >= 256:
-            self.settings['palette_shift'] = 0
-        elif len(self.palette) >= 128:
-            self.settings['palette_shift'] = 1
-        else:
-            self.settings['palette_shift'] = 2
-
-    def calc_frame(self):
-        cn = self.calc_n
-        mi = cn - 1
-        if self.settings['scroll_speed'] != 0:
-            self.heat_map.scroll(self.settings['scroll_speed'])
-
-        # calculate sparks at insertion points
-        for ip in self._flash_points:
-            spark = getrandbits(8)
-            if spark <= self.settings['sparking']:
-                # add a spark at insert_point with random heat between 192 and 255
-                val = 224 + (spark & 31)
-            else:
-                val = (spark & 127) | 64
-            self.heat_map[ip] = val
-            if self.settings.get('debug'):
-                print('Adding {} at {}'.format(val, ip))
-
-        # cool and blend
-        heat_map = trickLED.ByteMap(self.calc_n, bpi=1)
-        cooling = self.settings['cooling']
-        for i in range(self.calc_n):
-            if self._blend_map[i]:
-                if 0 < i < mi:
-                    val = sum(self.heat_map[i-1:i+2]) / 3 - cooling
-                elif i == 0:
-                    val = sum(self.heat_map[0:2]) / 2 - cooling
-                else:
-                    val = sum(self.heat_map[-2:]) / 2 - cooling
-            elif i in self._flash_points:
-                # No cooling at flash points
-                val = self.heat_map[i]
-            else:
-                val = self.heat_map[i] - cooling
-            heat_map[i] = trickLED.uint8(val)
-        self.heat_map = heat_map
-
-        # convert heat map to colors
-        ps = self.settings['palette_shift']
-        for i in range(self.calc_n):
-            self.leds[i] = self.palette[self.heat_map[i] >> ps]
-
-
 class Convergent(AnimationBase):
     """ Light marches two at a time and meets in the middle """
     def __init__(self, leds, fill_mode=None, **kwargs):
         super().__init__(leds, **kwargs)
-        self.settings['fill_mode'] = fill_mode or self.FILL_MODE_SOLID
-
-    def setup(self):
         if self.palette is None:
             self.palette = default_palette(20)
+        self.settings['fill_mode'] = fill_mode or trickLED.FILL_MODE_SOLID
+
+    def setup(self):
+        if self.generator is not None:
+            self.palette.fill_gen(self.generator)
         self.state['insert_points'] = [0, self.calc_n - 1]
         self.state['palette_idx'] = 0
         self.start_cycle()
@@ -440,7 +349,7 @@ class Convergent(AnimationBase):
             self.start_cycle()
             return
         if new_insert:
-            if self.settings['fill_mode'] == self.FILL_MODE_MULTI:
+            if self.settings['fill_mode'] == trickLED.FILL_MODE_MULTI:
                 self.state['palette_idx'] = (self.state['palette_idx'] + 1) % len(self.palette)
                 self.state['color'] = self.palette[self.state['palette_idx']]
             for ip in self.state['insert_points']:
@@ -453,14 +362,16 @@ class Divergent(AnimationBase):
     """ Like Convergent, but not """
     def __init__(self, leds, fill_mode=None, **kwargs):
         super().__init__(leds, **kwargs)
-        self.settings['fill_mode'] = fill_mode or self.FILL_MODE_SOLID
-
-    def setup(self):
         if self.palette is None:
             self.palette = default_palette(20)
-        self.state['palette_idx'] = 0
+        self.settings['fill_mode'] = fill_mode or trickLED.FILL_MODE_SOLID
+
+    def setup(self):
+        if self.generator is not None:
+            self.palette.fill_gen(self.generator)
         hwp = self.calc_n // 2
         self.state['insert_points'] = [hwp, hwp+1]
+        self.state['palette_idx'] = 0
         self.start_cycle()
 
     def start_cycle(self):
@@ -494,69 +405,10 @@ class Divergent(AnimationBase):
             self.start_cycle()
             return
         if new_insert:
-            if self.settings['fill_mode'] == self.FILL_MODE_MULTI:
+            if self.settings['fill_mode'] == trickLED.FILL_MODE_MULTI:
                 self.state['palette_idx'] = (self.state['palette_idx'] + 1) % len(self.palette)
                 self.state['color'] = self.palette[self.state['palette_idx']]
             for ip in self.state['insert_points']:
                 self.leds[ip] = self.state['color']
             mvr = self.state['insert_points'][:]
         self.state['movers'] = mvr
-
-
-class Conjunction(AnimationBase):
-    """
-    """
-    def __init__(self, leds, **kwargs):
-        super().__init__(leds, **kwargs)
-        if not self.generator:
-            # in this animation the generator will be used to fill the palette each cycle
-            self.generator = generators.fading_color_wheel(hue_stride=25, stripe_size=16, mode=trickLED.FADE_OUT)
-        self.palette = trickLED.ByteMap(32, bpi=3)
-        self.color_map = trickLED.ByteMap(self.calc_n, bpi=1)
-
-    def setup(self):
-        self.state = {'step': 0, 'insert_points': []}
-        self.start_cycle()
-
-    def start_cycle(self):
-        self.color_map.fill(0)
-        self.leds.fill(0)
-        self.palette.fill_gen(self.generator, direction=-1)
-        # self.state['add'] = 1 if getrandbits(1) else -1
-        self.state['step'] = 0
-        rn = getrandbits(5) # 0-31
-        self.state['insert_points'] = [rn - 32, rn]
-        while rn < self.calc_n:
-            rn += 32
-            self.state['insert_points'].append(rn)
-
-    def calc_frame(self):
-        step = self.state['step']
-        self.state['step'] += 1
-        if step >= 16:
-            self.start_cycle()
-            return
-        #
-        for i in range(self.calc_n):
-            if self.color_map[i]:
-                self.color_map[i] = trickLED.uint8(self.color_map[i] - 1)
-
-        j = 0
-        for ip in self.state['insert_points']:
-            ni = ip - step
-            pi = ip + step
-            if 0 <= ni < self.calc_n:
-                cv = [15, 31][j % 2]
-                self.color_map[ni] = cv
-            if 0 <= pi < self.calc_n:
-                cv = [31, 15][j % 2]
-                self.color_map[pi] = cv
-            j += 1
-
-        for i in range(self.calc_n):
-            ci = self.color_map[i]
-            if ci:
-                self.leds[i] = self.palette[ci]
-            else:
-                self.leds[i] = 0
-
