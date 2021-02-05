@@ -1,7 +1,7 @@
 import machine
 import network
 import time
-import settings
+import config
 import socket
 import sys
 
@@ -13,7 +13,6 @@ except ImportError:
 import trickLED
 from trickLED import animations
 from trickLED import generators
-from trickLED.testing import timeit
 
 
 def connect(ssid, password, timeout=30):
@@ -34,9 +33,6 @@ def connect(ssid, password, timeout=30):
 def play(animation, n_frames, **kwargs):
     try:
         asyncio.run(animation.play(n_frames, **kwargs))
-    except KeyboardInterrupt as e:
-        animation._print_fps()
-        raise e
     finally:
         # needed to reset state otherwise the animations will get all jumbled when ended with CTRL+C
         asyncio.new_event_loop()
@@ -75,23 +71,14 @@ def demo_animations(leds, n_frames=200):
     ani = animations.SideSwipe(leds)
     print('SideSwipe settings: default')
     play(ani, n_frames)
-    
-    if leds.n > 60:
-        print('Setting leds.repeat_n = 40, set it back to {} if you cancel the demo'.format(leds_repeat_n))
-        leds.repeat_n = 40
-    
-    # Fire
-    ani = animations.Fire(leds)
-    print('Fire settings: default')
-    play(ani, n_frames)
-    
+
     # Divergent
     ani = animations.Divergent(leds)
     print('Divergent settings: default')
     play(ani, n_frames)
     print('Divergent settings: fill_mode=FILL_MODE_MULTI')
     play(ani, n_frames, fill_mode=trickLED.FILL_MODE_MULTI)
-    
+
     # Convergent
     ani = animations.Convergent(leds)
     print('Convergent settings: default')
@@ -99,14 +86,23 @@ def demo_animations(leds, n_frames=200):
     print('Convergent settings: fill_mode=FILL_MODE_MULTI')
     play(ani, n_frames, fill_mode=trickLED.FILL_MODE_MULTI)
 
-    # Conjuction
-    ani = animations.Conjunction(leds)
-    print('Conjuction settings: default')
-    play(ani, n_frames)
+    if leds.n > 60 and leds.repeat_n is None:
+        print('Setting leds.repeat_n = 40, set it back to {} if you cancel the demo'.format(leds_repeat_n))
+        leds.repeat_n = 40
+
+    if 'trickLED.animations32' in sys.modules:
+        # Fire
+        ani = animations32.Fire(leds)
+        print('Fire settings: default')
+        play(ani, n_frames)
+
+        # Conjuction
+        ani = animations32.Conjunction(leds)
+        print('Conjuction settings: default')
+        play(ani, n_frames)
     
     if leds.repeat_n != leds_repeat_n:
         leds.repeat_n = leds_repeat_n
-
 
 def demo_generators(leds, n_frames=200):
     print('Demonstrating generators:')
@@ -156,6 +152,7 @@ def demo_generators(leds, n_frames=200):
     play(ani, n_frames)
 
 def sock_stream_handler(data):
+    pass
 
 
 def main():
@@ -171,14 +168,14 @@ def main():
 if __name__ == '__main__':
     if sys.platform == 'esp32':
         led_pin = machine.Pin(26)
+        from trickLED import animations32
     else:
         # labeled D2 on most ESP8266 boards
         led_pin = machine.Pin(4)
 
-    sta = connect(settings.SSID, settings.WIFI_PWD)
-    tl = trickLED.TrickLED(led_pin, 60)
-    """
+    sta = connect(config.SSID, config.WIFI_PWD)
+    tl = trickLED.TrickLED(led_pin, 20, timing=1)
+
     while True:
-        demo_animations(tl, 150)
+        demo_animations(tl, 300)
         demo_generators(tl, 150)
-    """

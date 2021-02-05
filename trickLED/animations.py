@@ -8,6 +8,11 @@ try:
 except ImportError:
     randrange = trickLED.randrange
 
+try:
+    import uasyncio as asyncio
+except ImportError:
+    import asyncio
+
 
 def default_palette(n, brightness=200):
     """ Generate a color palette by stepping through the color wheel """

@@ -1,11 +1,12 @@
 ## Purpose ##
 Provide a framework for doing addressable LED animations in Micropython. This is not as fast
 or efficient as the FastLED for Arduino. But it is pretty easy to create your own custom animation. 
-And many of the animations use Python generators for their colors.  You can make a custom 
+Many of the animations use Python generators for their colors.  You can make a custom 
 animation by writing a color generator and passing it to an animation class like NextGen or SideSwipe.
 Most of the included color generators are a dozen lines of code or less.
 
-Watch the [demo video](https://www.youtube.com/watch?v=vLvrJPNvkvU) showing the available animations and color generators.
+Watch the [demo video](https://www.youtube.com/watch?v=vLvrJPNvkvU) 
+showing the available animations and color generators.
 
 ### Hardware Support 
 It currently supports the ESP32. It runs on the ESP8266, but only with the precompiled byte code. 

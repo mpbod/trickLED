@@ -155,7 +155,6 @@ def randrange(low, high):
         return rv
     return high
       
-    
 
 def colval(val, bpp=3):
     """ allow the input of color values as ints (including hex) and None/0 for black """

@@ -99,9 +99,22 @@ class TrickLEDTest(unittest.TestCase):
         self.assertEqual(0, bm[0], 'incorrect value for scroll(-1)')
 
     def test_byte_map(self):
-        bm = trickLED.ByteMap(30)
+        bm = trickLED.ByteMap(30, bpi=3)
         bm[20] = self.c1
         self.assertEqual(self.c1, bm[20], 'did not get value we stored back')
         bm.scroll(2)
         self.assertEqual(self.c1, bm[22], 'incorrect value returned after scroll')
+        # (50, 200, 100)
+        bm.fill(self.c2)
+        self.assertEqual(self.c2, bm[29], 'incorrect value returned after fill')
+        bm.add(5)
+        self.assertEqual((55, 205, 105), bm[0], 'incorrect value after ByteMap.add int')
+        bm.add((10, 0, 20))
+        self.assertEqual((65, 205, 125), bm[0], 'incorrect value after ByteMap.add tuple')
+        bm.sub((15, 5, 25))
+        self.assertEqual(self.c2, bm[0], 'incorrect value after ByteMap.sub')
+        bm.mul(2)
+        self.assertEqual((100, 255, 200), bm[0], 'incorrect value after ByteMap.mul')
+        bm.div((4, 1, 5))
+        self.assertEqual((25, 255, 40), bm[0], 'incorrect value after ByteMap.div')
 
