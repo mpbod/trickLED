@@ -100,7 +100,7 @@ class AnimationBase:
         """
         for kw in kwargs:
             self.settings[kw] = kwargs[kw]
-        self.leds.fill(0)
+        self.leds.fill((0,0,0))
         self.setup()
         self.frame = 0        
         ival = self.settings['interval']
