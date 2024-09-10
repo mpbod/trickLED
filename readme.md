@@ -15,9 +15,7 @@ It currently supports the ESP32. It runs on the ESP8266, but only with the preco
 If you are running on an ESP8266, copy over the *.mpy files instead of *.py. 
 
 ### TrickLED Examples
-    import uasyncio as asyncio
     import trickLED
-    from trickLED import animations
     from trickLED import generators
     
     # use TrickLED class instead of NeoPixel
@@ -47,6 +45,9 @@ you typically override the setup, and calc_frame methods. Additional keyword arg
 __init__() and play() are automatically added to the self.settings dict. 
 All runtime info should be stored in the self.state dict.
 
+    import uasyncio as asyncio
+    from trickLED import animations32
+    
     ani = animations.Fire(tl, interval=40)
     # settings can also be set by passing as keyword arguments to play()
     asyncio.run(ani.play(500, sparking=64, cooling=15))
