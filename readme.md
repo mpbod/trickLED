@@ -1,3 +1,5 @@
+> This is a import from https://gitlab.com/scottrbailey/trickLED. Original work by @scottrbailey.
+
 ## Purpose ##
 Provide a framework for doing addressable LED animations in Micropython. This is not as fast
 or efficient as the FastLED for Arduino. But it is pretty easy to create your own custom animation. 
